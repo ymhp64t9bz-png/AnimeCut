@@ -14,15 +14,18 @@ numba
 # Será instalado separadamente no Dockerfile com CMAKE_ARGS
 
 # ==================== VIDEO PROCESSING ====================
-moviepy>=1.0.3
-opencv-python-headless>=4.8.1.78
-imageio>=2.31.0
-imageio-ffmpeg>=0.4.9
-decorator>=4.4.2
+moviepy==1.0.3
+opencv-python-headless==4.10.0.84
+imageio==2.34.0
+imageio-ffmpeg==0.5.1
+decorator==5.1.1
+proglog==0.1.10
+# Dependências adicionais do MoviePy
+ffmpeg-python==0.2.0
 
 # ==================== IMAGE PROCESSING (PIL) ====================
 Pillow>=10.1.0
-numpy>=1.24.0,<2.0.0
+numpy==1.26.4
 
 # ==================== AUDIO PROCESSING ====================
 pydub>=0.25.1
