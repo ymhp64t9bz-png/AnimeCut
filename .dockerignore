@@ -1,0 +1,93 @@
+# ✂️ AnimeCut Serverless v6.0 - Docker Ignore
+# Arquivos e diretórios que não devem ser copiados para a imagem Docker
+
+# ==================== DOCUMENTAÇÃO ====================
+*.md
+!README.md
+docs/
+*.txt
+!requirements.txt
+
+# ==================== PYTHON ====================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ==================== VIRTUAL ENVIRONMENTS ====================
+venv/
+ENV/
+env/
+.venv
+
+# ==================== IDE ====================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ==================== GIT ====================
+.git/
+.gitignore
+.gitattributes
+
+# ==================== DOCKER ====================
+Dockerfile
+.dockerignore
+docker-compose.yml
+.docker/
+
+# ==================== TESTES ====================
+tests/
+test_*.py
+*_test.py
+pytest.ini
+.pytest_cache/
+
+# ==================== LOGS ====================
+*.log
+logs/
+
+# ==================== TEMPORÁRIOS ====================
+temp/
+tmp/
+*.tmp
+.cache/
+
+# ==================== MODELOS (se não quiser incluir) ====================
+# models/*.gguf
+# models/*.bin
+
+# ==================== OUTPUTS ====================
+output/
+outputs/
+*.mp4
+*.avi
+*.mkv
+*.wav
+*.mp3
+
+# ==================== OUTROS ====================
+.env
+.env.local
+*.bak
+*.backup

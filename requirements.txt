@@ -1,0 +1,46 @@
+# ✂️ AnimeCut Serverless v6.0 - Requirements
+# Dependências otimizadas para RunPod Serverless
+
+# ==================== RUNPOD ====================
+runpod>=1.5.0
+
+# ==================== AI - WHISPER (Transcrição) ====================
+openai-whisper>=20231117
+# Dependências do Whisper
+tiktoken>=0.5.0
+numba
+
+# ==================== AI - LLAMA CPP (Qwen 2.5) ====================
+# Será instalado separadamente no Dockerfile com CMAKE_ARGS
+
+# ==================== VIDEO PROCESSING ====================
+moviepy>=1.0.3
+opencv-python-headless>=4.8.1.78
+imageio>=2.31.0
+imageio-ffmpeg>=0.4.9
+decorator>=4.4.2
+
+# ==================== IMAGE PROCESSING (PIL) ====================
+Pillow>=10.1.0
+numpy>=1.24.0,<2.0.0
+
+# ==================== AUDIO PROCESSING ====================
+pydub>=0.25.1
+soundfile>=0.12.1
+
+# ==================== BACKBLAZE B2 (S3 Compatible) ====================
+boto3>=1.29.0
+botocore>=1.32.0
+
+# ==================== HTTP & NETWORKING ====================
+requests>=2.31.0
+urllib3>=2.1.0
+
+# ==================== UTILITIES ====================
+tqdm>=4.66.0
+python-dotenv>=1.0.0
+colorama>=0.4.6
+typing-extensions>=4.8.0
+
+# ==================== PROGBAR ====================
+proglog>=0.1.10
