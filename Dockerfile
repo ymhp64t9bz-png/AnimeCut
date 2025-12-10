@@ -76,13 +76,7 @@ COPY requirements.txt .
 # Atualiza pip
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Instala llama-cpp-python com CUDA PRIMEIRO (separado)
-RUN CMAKE_ARGS="-DGGML_CUDA=on" pip install --no-cache-dir --force-reinstall --no-deps llama-cpp-python>=0.2.27
-
-# Instala dependências do llama-cpp-python
-RUN pip install --no-cache-dir typing-extensions>=4.5.0 numpy>=1.20.0 diskcache>=5.6.1
-
-# Instala demais dependências
+# Instala todas as dependências do requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Cleanup
