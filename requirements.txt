@@ -30,8 +30,8 @@ scipy>=1.11.0
 
 
 # ==================== WHISPER ====================
-# Versão estável que funciona bem com Torch 2.3+ e CUDA 12
-faster-whisper==1.0.2
+# Downgrade para 0.10.1 para suportar ctranslate2 3.x (compatível com cuDNN 8)
+faster-whisper==0.10.1
 ctranslate2==3.24.0
 
 # ==================== BACKBLAZE B2 ====================
