@@ -41,4 +41,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # ==================== CODIGO ====================
 COPY handler.py .
 
+# FORÇAR VERSÕES COMPATÍVEIS NO FINAL DO BUILD PARA GARANTIR
+# Isso corrige o erro 'register_pytree_node' garantindo que transformers use APIs antigas do PyTorch
+RUN pip uninstall -y transformers accelerate && \
+    pip install "transformers==4.38.2" "accelerate==0.27.2" --no-cache-dir
+
 CMD ["python3", "-u", "handler.py"]
