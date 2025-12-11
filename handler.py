@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-✂️ AnimeCut Serverless v7.0 - Handler Completo
-Todas as funcionalidades do AnimeCut local
+✂️ AnimeCut Serverless v7.0 PRO (GPU + IA)
+Identificação de cenas virais com Qwen 2.5 e Whisper
 """
 
 import runpod
@@ -12,17 +12,19 @@ import logging
 import tempfile
 import requests
 import gc
+import json
 import time
 import uuid
+import math
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 # ==================== CONFIGURAÇÃO ====================
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger("AnimeCut")
+logger = logging.getLogger("AnimeCutPro")
 
 # Diretórios
 TEMP_DIR = Path("/tmp/animecut")
@@ -30,15 +32,31 @@ OUTPUT_DIR = Path("/tmp/animecut/output")
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# Debug Env Vars
+print("--- ENV VARS DEBUG ---")
+for k, v in os.environ.items():
+    if "KEY" in k or "SECRET" in k or "TOKEN" in k:
+        print(f"{k}: {'*' * 8}")
+    else:
+        print(f"{k}: {v}")
+print("----------------------")
+sys.stdout.flush()
+
+# Caminho do Volume de Rede (Ajustar conforme necessário)
+VOLUME_PATH = Path("/runpod-volume")
+MODELS_PATH = VOLUME_PATH / "models"
+QWEN_MODEL_PATH = MODELS_PATH / "Qwen2.5-7B-Instruct" # Caminho provável, ajustável via ENV
+
 print("=" * 60)
-print("✂️ AnimeCut Serverless v7.0 - Full Features")
+print("✂️ AnimeCut Serverless v7.0 PRO - GPU/AI Activated")
+print(f"📂 Volume Path: {VOLUME_PATH}")
 print("=" * 60)
 
 # ==================== IMPORTS CONDICIONAIS ====================
 try:
     from moviepy.editor import (
         VideoFileClip, ImageClip, CompositeVideoClip,
-        ColorClip, TextClip
+        ColorClip, TextClip, AudioFileClip
     )
     from moviepy.video.fx.all import speedx
     import numpy as np
@@ -55,6 +73,26 @@ try:
 except ImportError as e:
     PIL_AVAILABLE = False
     logger.error(f"❌ PIL não disponível: {e}")
+
+try:
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from faster_whisper import WhisperModel
+    
+    GPU_AVAILABLE = torch.cuda.is_available()
+    DEVICE = "cuda" if GPU_AVAILABLE else "cpu"
+    
+    if GPU_AVAILABLE:
+        logger.info(f"✅ GPU Detectada: {torch.cuda.get_device_name(0)}")
+        logger.info(f"💾 VRAM Total: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+    else:
+        logger.warning("⚠️ GPU NÃO detectada, processamento será lento!")
+        
+    AI_AVAILABLE = True
+except ImportError as e:
+    AI_AVAILABLE = False
+    GPU_AVAILABLE = False
+    logger.error(f"❌ Bibliotecas de IA faltando: {e}")
 
 try:
     import boto3
@@ -77,409 +115,379 @@ try:
         logger.info("✅ Backblaze B2 configurado")
     else:
         B2_AVAILABLE = False
-        logger.warning("⚠️ B2 credentials não configuradas")
+        logger.warning("⚠️ B2 credentials não configuradas nas Env Vars!")
+        # Debug das keys (apenas tamanho para segurança)
+        logger.info(f"🔑 Key ID Len: {len(B2_KEY_ID)}")
+        logger.info(f"🔑 App Key Len: {len(B2_APP_KEY)}")
 except Exception as e:
     B2_AVAILABLE = False
     logger.error(f"❌ Erro ao configurar B2: {e}")
 
-# ==================== DOWNLOAD DE VÍDEO ====================
+# ==================== CARREGAMENTO DE MODELOS ====================
+whisper_model = None
+qwen_model = None
+qwen_tokenizer = None
+
+def load_whisper():
+    """Carrega Whisper na GPU"""
+    global whisper_model
+    if whisper_model is None and AI_AVAILABLE:
+        try:
+            logger.info("🎧 Carregando Whisper (Large-v3)...")
+            whisper_model = WhisperModel("large-v3", device=DEVICE, compute_type="float16")
+            logger.info("✅ Whisper carregado")
+        except Exception as e:
+            logger.error(f"❌ Erro ao carregar Whisper: {e}")
+
+def load_qwen():
+    """Carrega Qwen 2.5 da GPU/Volume"""
+    global qwen_model, qwen_tokenizer
+    if qwen_model is None and AI_AVAILABLE:
+        try:
+            model_path = str(QWEN_MODEL_PATH)
+            
+            # Fallback para Hub se não achar no volume
+            if not os.path.exists(model_path):
+                logger.warning(f"⚠️ Modelo não encontrado no volume: {model_path}")
+                logger.info("🌐 Tentando baixar do HuggingFace (Qwen/Qwen2.5-7B-Instruct)...")
+                model_path = "Qwen/Qwen2.5-7B-Instruct"
+            else:
+                logger.info(f"📂 Carregando Qwen do volume: {model_path}")
+
+            logger.info("🧠 Carregando Qwen 2.5...")
+            qwen_tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+            qwen_model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                device_map="auto",
+                torch_dtype=torch.float16,
+                trust_remote_code=True
+            )
+            logger.info("✅ Qwen 2.5 carregado")
+        except Exception as e:
+            logger.error(f"❌ Erro ao carregar Qwen: {e}")
+
+# ==================== DOWNLOAD ====================
 def download_video(url: str) -> str:
-    """Baixa vídeo da URL"""
     try:
         logger.info(f"📥 Baixando vídeo...")
-        
         temp_file = TEMP_DIR / f"input_{uuid.uuid4().hex[:8]}.mp4"
-        
         response = requests.get(url, stream=True, timeout=300)
         response.raise_for_status()
-        
-        total_size = int(response.headers.get('content-length', 0))
+        total = int(response.headers.get('content-length', 0))
         downloaded = 0
-        
         with open(temp_file, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
+            for chunk in response.iter_content(chunk_size=1024*1024):
                 f.write(chunk)
                 downloaded += len(chunk)
-                if total_size > 0 and downloaded % (1024 * 1024) == 0:  # Log a cada 1MB
-                    progress = (downloaded / total_size) * 100
-                    logger.info(f"📥 Download: {progress:.1f}%")
-        
-        logger.info(f"✅ Download completo: {temp_file} ({downloaded / 1024 / 1024:.2f} MB)")
+                if total > 0 and downloaded % (10*1024*1024) == 0:
+                    logger.info(f"📥 Download: {downloaded/total*100:.1f}%")
+        logger.info(f"✅ Download completo: {temp_file}")
         return str(temp_file)
-        
     except Exception as e:
-        logger.error(f"❌ Erro no download: {e}")
+        logger.error(f"❌ Erro download: {e}")
         raise
 
-# ==================== DOWNLOAD DE BACKGROUND ====================
 def download_background(url: str) -> Optional[str]:
-    """Baixa imagem de background"""
     try:
-        if not url:
-            return None
-            
+        if not url: return None
         logger.info(f"🖼️ Baixando background...")
-        
         temp_file = TEMP_DIR / f"bg_{uuid.uuid4().hex[:8]}.png"
-        
         response = requests.get(url, timeout=60)
-        response.raise_for_status()
-        
-        with open(temp_file, 'wb') as f:
-            f.write(response.content)
-        
-        logger.info(f"✅ Background baixado: {temp_file}")
+        with open(temp_file, 'wb') as f: f.write(response.content)
         return str(temp_file)
+    except: return None
+
+# ==================== IA: QUICK TRANSCRIPTION & ANALYSIS ====================
+def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
+    """Analisa vídeo para encontrar cenas virais"""
+    try:
+        load_whisper()
+        load_qwen()
+        
+        if not whisper_model or not qwen_model:
+            raise Exception("Modelos de IA não carregados")
+            
+        # 1. Extração de áudio
+        logger.info("🔊 Extraindo áudio para transcrição...")
+        audio_path = TEMP_DIR / f"temp_audio_{uuid.uuid4().hex[:8]}.wav"
+        
+        # Usar ffmpeg diretamente é mais rápido que moviepy para extrair audio
+        import subprocess
+        subprocess.run([
+            'ffmpeg', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', 
+            '-ar', '16000', '-ac', '1', str(audio_path), '-y', '-hide_banner', '-loglevel', 'error'
+        ])
+        
+        # 2. Transcrição
+        logger.info("🎤 Transcrevendo com Whisper...")
+        segments, _ = whisper_model.transcribe(str(audio_path), language="pt")
+        
+        transcript = []
+        full_text = ""
+        for seg in segments:
+            transcript.append({
+                "start": seg.start,
+                "end": seg.end,
+                "text": seg.text
+            })
+            full_text += f"[{seg.start:.1f}s - {seg.end:.1f}s] {seg.text}\n"
+            
+        logger.info(f"📝 Transcrição completa ({len(transcript)} segmentos)")
+        
+        # 3. Análise com Qwen
+        logger.info("🧠 Analisando roteiro com Qwen 2.5...")
+        
+        prompt = f"""
+        Você é um editor de vídeo especialista em Animes e TikTok.
+        Analise o seguinte roteiro transcrito do anime '{anime_name}'.
+        Identifique as 3 MELHORES cenas para clipes virais (entre 40s e 90s).
+        Procure por momentos de: Ação Intensa, Plot Twist, Comédia, Emoção Fore ou Frases Impactantes.
+        
+        ROTEIRO:
+        {full_text[:12000]} # Limite de contexto
+        
+        Retorne APENAS um JSON neste formato, sem explicações:
+        [
+            {{
+                "start": 10.5,
+                "end": 65.0,
+                "reason": "Explicação curta do motivo",
+                "title": "TÍTULO VIRAL e CURTO",
+                "score": 95
+            }}
+        ]
+        """
+        
+        inputs = qwen_tokenizer([prompt], return_tensors="pt").to(DEVICE)
+        outputs = qwen_model.generate(
+            **inputs, 
+            max_new_tokens=1000,
+            temperature=0.7
+        )
+        response_text = qwen_tokenizer.decode(outputs[0], skip_special_tokens=True)
+        
+        # Extrair JSON da resposta (pode ter texto antes/depois)
+        json_str = response_text
+        if "```json" in response_text:
+            json_str = response_text.split("```json")[1].split("```")[0]
+        elif "[" in response_text and "]" in response_text:
+            start = response_text.find("[")
+            end = response_text.rfind("]") + 1
+            json_str = response_text[start:end]
+            
+        viral_cuts = json.loads(json_str)
+        logger.info(f"🔥 {len(viral_cuts)} cenas virais identificadas!")
+        
+        # Limpeza
+        os.remove(audio_path)
+        
+        return viral_cuts
         
     except Exception as e:
-        logger.warning(f"⚠️ Erro ao baixar background: {e}")
-        return None
+        logger.error(f"❌ Erro na análise de IA: {e}")
+        # Fallback para cortes manuais se IA falhar
+        return []
 
-# ==================== GERAÇÃO DE TÍTULO COM PIL ====================
-def criar_titulo_pil(
-    texto: str,
-    largura: int,
-    altura: int,
-    duracao: float,
-    font_size: int = 60,
-    text_color: str = "#FFFFFF",
-    stroke_color: str = "#000000",
-    stroke_width: int = 3,
-    pos_vertical: float = 0.15
-) -> ImageClip:
-    """Cria título usando PIL"""
+# ==================== RENDERIZAÇÃO OTIMIZADA ====================
+def criar_titulo_pil(texto: str, w: int, h: int, duracao: float, style: dict) -> ImageClip:
+    """Cria título com PIL"""
+    if not PIL_AVAILABLE: return None
     try:
-        if not PIL_AVAILABLE:
-            logger.warning("⚠️ PIL não disponível, título não será gerado")
-            return None
-        
-        # Cria imagem transparente
-        img = Image.new('RGBA', (largura, altura), (0, 0, 0, 0))
+        img = Image.new('RGBA', (w, h), (0,0,0,0))
         draw = ImageDraw.Draw(img)
         
-        # Fonte (usa DejaVu como fallback)
+        font_size = style.get("fontSize", 60)
         try:
             font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
         except:
             font = ImageFont.load_default()
-        
-        # Quebra texto em linhas
-        words = texto.split()
-        lines = []
-        current_line = []
-        
-        for word in words:
-            test_line = ' '.join(current_line + [word])
-            bbox = draw.textbbox((0, 0), test_line, font=font)
-            if bbox[2] - bbox[0] < largura * 0.9:
-                current_line.append(word)
-            else:
-                if current_line:
-                    lines.append(' '.join(current_line))
-                current_line = [word]
-        
-        if current_line:
-            lines.append(' '.join(current_line))
-        
-        # Desenha texto
-        y_pos = int(altura * pos_vertical)
-        
-        for line in lines:
-            bbox = draw.textbbox((0, 0), line, font=font)
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
-            x_pos = (largura - text_width) // 2
             
-            # Borda
-            for adj_x in range(-stroke_width, stroke_width + 1):
-                for adj_y in range(-stroke_width, stroke_width + 1):
-                    draw.text((x_pos + adj_x, y_pos + adj_y), line, font=font, fill=stroke_color)
-            
-            # Texto
-            draw.text((x_pos, y_pos), line, font=font, fill=text_color)
-            y_pos += text_height + 10
+        color = style.get("textColor", "#FFFFFF")
+        stroke = style.get("borderColor", "#000000")
+        width = style.get("borderWidth", 3)
         
-        # Converte para clip
-        img_array = np.array(img)
-        return ImageClip(img_array).set_duration(duracao)
+        # Centraliza texto
+        bbox = draw.textbbox((0, 0), texto, font=font)
+        text_w = bbox[2] - bbox[0]
+        x = (w - text_w) // 2
+        y = int(h * (style.get("verticalPosition", 15) / 100))
         
-    except Exception as e:
-        logger.error(f"❌ Erro ao criar título: {e}")
-        return None
+        # Borda
+        for dx in range(-width, width+1):
+            for dy in range(-width, width+1):
+                draw.text((x+dx, y+dy), texto, font=font, fill=stroke)
+        
+        draw.text((x, y), texto, font=font, fill=color)
+        
+        return ImageClip(np.array(img)).set_duration(duracao)
+    except: return None
 
-# ==================== PROCESSAMENTO DE CORTE ====================
-def processar_corte(
-    video_path: str,
-    inicio: float,
-    fim: float,
-    numero_corte: int,
-    config: dict
-) -> str:
-    """Processa um corte de vídeo com todas as funcionalidades"""
+def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> str:
     try:
-        logger.info(f"✂️ Processando corte {numero_corte}: {inicio}s - {fim}s")
+        start = cut_data['start']
+        end = cut_data['end']
+        duration = end - start
         
-        if not MOVIEPY_AVAILABLE:
-            raise Exception("MoviePy não disponível")
+        logger.info(f"🎬 Renderizando Corte {num}: {start:.1f}-{end:.1f} ({config.get('animeName')})")
         
         with VideoFileClip(video_path) as video:
-            duracao_corte = min(fim - inicio, 300)
-            clip = video.subclip(inicio, min(inicio + duracao_corte, video.duration))
+            clip = video.subclip(start, end)
             
-            # Anti-Shadowban (Speed Ramp)
-            if config.get("antiShadowban", False):
-                logger.info("🎭 Aplicando Anti-Shadowban (Speed Ramp 1.05x)")
+            # Anti-Shadowban (Speed)
+            if config.get("antiShadowban"):
                 clip = clip.fx(speedx, 1.05)
             
-            # Composição
             target_w, target_h = 1080, 1920
             
+            # Verticalização Inteligente (Crop Central Simples por enquanto)
+            # Para otimizar, não vou usar mediapipe aqui se estivermos com pouco tempo
+            # Mas vamos manter o resize básico
+            
             # Background
-            background_path = config.get("background_path")
-            if background_path and os.path.exists(background_path):
-                logger.info("🖼️ Usando background customizado")
+            bg_path = config.get("background_path")
+            if bg_path:
                 from PIL import Image as PILImage
-                fundo_img = PILImage.open(background_path).convert('RGB')
-                fundo_img = fundo_img.resize((target_w, target_h), PILImage.Resampling.LANCZOS)
-                fundo_array = np.array(fundo_img)
-                fundo = ImageClip(fundo_array).set_duration(duracao_corte)
+                bg_img = PILImage.open(bg_path).convert('RGB').resize((target_w, target_h))
+                bg_clip = ImageClip(np.array(bg_img)).set_duration(clip.duration)
             else:
-                logger.info("🎨 Usando background padrão")
-                fundo = ColorClip(size=(target_w, target_h), color=(20, 10, 40)).set_duration(duracao_corte)
+                bg_clip = ColorClip(size=(target_w, target_h), color=(10,10,20)).set_duration(clip.duration)
             
-            # Redimensiona vídeo (fit)
-            video_w, video_h = clip.size
-            scale = min(target_w / video_w, target_h / video_h)
-            if video_w * (target_h / video_h) < target_w:
-                scale = target_w / video_w
-            
+            # Ajuste do Clip
+            scale = target_w / clip.w
             clip_resized = clip.resize(scale)
-            pos_y = int((target_h - clip_resized.h) * 0.5)
-            clip_resized = clip_resized.set_position(('center', pos_y))
+            clip_pos = clip_resized.set_position(('center', 'center'))
             
-            elementos = [fundo, clip_resized]
+            # Título Inteligente (do Qwen) ou Fallback
+            titulo_texto = cut_data.get("title", config.get("titulo", ""))
             
-            # Título
-            titulo = config.get("titulo")
-            if titulo and config.get("generateTitles", False):
-                logger.info(f"📝 Adicionando título: {titulo}")
-                title_style = config.get("titleStyle", {})
-                t_clip = criar_titulo_pil(
-                    titulo,
-                    target_w,
-                    target_h,
-                    duracao_corte,
-                    font_size=title_style.get("fontSize", 60),
-                    text_color=title_style.get("textColor", "#FFFFFF"),
-                    stroke_color=title_style.get("borderColor", "#000000"),
-                    stroke_width=title_style.get("borderWidth", 3),
-                    pos_vertical=title_style.get("verticalPosition", 15) / 100
-                )
-                if t_clip:
-                    elementos.append(t_clip)
+            layers = [bg_clip, clip_pos]
             
-            clip_final = CompositeVideoClip(elementos, size=(target_w, target_h))
+            if config.get("generateTitles"):
+                t_clip = criar_titulo_pil(titulo_texto.upper(), target_w, target_h, clip.duration, config.get("titleStyle", {}))
+                if t_clip: layers.append(t_clip)
             
-            # Exportação
-            filename = f"cut_{numero_corte:03d}_{uuid.uuid4().hex[:8]}.mp4"
-            output_path = OUTPUT_DIR / filename
+            final = CompositeVideoClip(layers, size=(target_w, target_h))
             
-            logger.info(f"🎬 Renderizando corte {numero_corte}...")
+            output_path = OUTPUT_DIR / f"cut_{num}_{uuid.uuid4().hex[:6]}.mp4"
             
-            clip_final.write_videofile(
+            # OTIMIZAÇÃO DE RENDER: usar preset ultrafast e threads
+            final.write_videofile(
                 str(output_path),
                 codec='libx264',
                 audio_codec='aac',
-                preset='fast',
-                ffmpeg_params=[
-                    '-profile:v', 'high',
-                    '-level', '4.1',
-                    '-pix_fmt', 'yuv420p',
-                    '-movflags', '+faststart'
-                ],
+                preset='ultrafast',  # MUITO MAIS RÁPIDO
+                threads=4,          # Usa múltiplos núcleos
+                ffmpeg_params=['-crf', '23'], # Qualidade balanceada
                 verbose=False,
                 logger=None
             )
             
-            clip_final.close()
-            gc.collect()
-            
-            logger.info(f"✅ Corte {numero_corte} concluído: {output_path}")
+            final.close()
             return str(output_path)
             
     except Exception as e:
-        logger.error(f"❌ Erro ao processar corte {numero_corte}: {e}")
+        logger.error(f"❌ Erro render corte {num}: {e}")
         raise
 
-# ==================== UPLOAD PARA B2 ====================
-def upload_to_b2(file_path: str, object_name: str = None) -> Optional[str]:
-    """Upload para Backblaze B2"""
+# ==================== UPLOAD B2 ====================
+def upload_to_b2(file_path: str) -> str:
+    if not B2_AVAILABLE: return None
     try:
-        if not B2_AVAILABLE:
-            logger.warning("⚠️ B2 não disponível, upload ignorado")
-            return None
-        
-        if object_name is None:
-            object_name = f"animecut/{os.path.basename(file_path)}"
-        
-        logger.info(f"📤 Uploading para B2: {object_name}")
-        
-        s3_client.upload_file(file_path, B2_BUCKET, object_name)
-        
-        # Gera URL assinada (válida por 1 hora)
-        url = s3_client.generate_presigned_url(
-            'get_object',
-            Params={'Bucket': B2_BUCKET, 'Key': object_name},
-            ExpiresIn=3600
-        )
-        
-        logger.info(f"✅ Upload completo: {object_name}")
-        return url
-        
+        name = f"animecut/v7/{os.path.basename(file_path)}"
+        logger.info(f"📤 Upload B2: {name}")
+        s3_client.upload_file(file_path, B2_BUCKET, name)
+        return s3_client.generate_presigned_url('get_object', Params={'Bucket': B2_BUCKET, 'Key': name}, ExpiresIn=3600)
     except Exception as e:
-        logger.error(f"❌ Erro no upload B2: {e}")
+        logger.error(f"❌ Erro upload B2: {e}")
         return None
 
-# ==================== PROCESSAMENTO PRINCIPAL ====================
-def process_video(video_path: str, config: dict) -> List[Dict]:
-    """Processa vídeo completo"""
-    try:
-        logger.info("🎬 Iniciando processamento de vídeo")
-        
-        if not MOVIEPY_AVAILABLE:
-            raise Exception("MoviePy não disponível")
-        
-        with VideoFileClip(video_path) as video:
-            duration = video.duration
-            logger.info(f"📊 Duração do vídeo: {duration}s")
-        
-        cut_type = config.get("cutType", "manual")
-        cuts_data = []
-        
-        if cut_type == "manual":
-            # Cortes manuais de 60s
-            num_cuts = min(5, int(duration / 60))
-            logger.info(f"✂️ Modo Manual: {num_cuts} cortes de 60s")
-            
-            for i in range(num_cuts):
-                start = i * 60
-                end = min(start + 60, duration)
-                
-                output_path = processar_corte(
-                    video_path,
-                    start,
-                    end,
-                    i + 1,
-                    config
-                )
-                
-                # Upload para B2
-                b2_url = upload_to_b2(output_path)
-                
-                cuts_data.append({
-                    "cut_number": i + 1,
-                    "start": start,
-                    "end": end,
-                    "duration": end - start,
-                    "local_path": output_path,
-                    "b2_url": b2_url
-                })
-        
-        else:  # auto mode
-            logger.info("🤖 Modo Automático não implementado ainda")
-            # TODO: Implementar detecção automática de cenas
-            raise Exception("Modo automático ainda não implementado")
-        
-        logger.info(f"✅ Processamento completo: {len(cuts_data)} cortes gerados")
-        return cuts_data
-        
-    except Exception as e:
-        logger.error(f"❌ Erro no processamento: {e}")
-        raise
-
-# ==================== HANDLER PRINCIPAL ====================
+# ==================== HANDLER ====================
 def handler(event):
-    """Handler principal do AnimeCut"""
+    gc.collect()
+    if torch.cuda.is_available(): torch.cuda.empty_cache()
+    
+    input_data = event.get("input", {})
+    if input_data.get("mode") == "test":
+        return {"status": "success", "gpu": GPU_AVAILABLE, "qwen": AI_AVAILABLE}
+    
     try:
-        logger.info("🚀 AnimeCut Handler iniciado")
-        logger.info(f"📦 Event: {event.get('id', 'N/A')}")
-        
-        input_data = event.get("input", {})
-        
-        # Modo de teste
-        if input_data.get("mode") == "test":
-            return {
-                "status": "success",
-                "message": "AnimeCut worker funcionando!",
-                "version": "7.0",
-                "features": {
-                    "moviepy": MOVIEPY_AVAILABLE,
-                    "pil": PIL_AVAILABLE,
-                    "b2": B2_AVAILABLE
-                }
-            }
-        
-        # Validação
         video_url = input_data.get("video_url")
-        if not video_url:
-            return {
-                "status": "error",
-                "error": "video_url não fornecido"
-            }
+        if not video_url: raise Exception("No video_url")
         
-        # Download de vídeo
+        # Config
+        config = {
+            "animeName": input_data.get("animeName", "Anime"),
+            "cutType": input_data.get("cutType", "auto"), # Auto por padrão agora
+            "antiShadowban": input_data.get("antiShadowban", True),
+            "generateTitles": input_data.get("generateTitles", True),
+            "titleStyle": input_data.get("titleStyle", {"fontSize": 70}),
+            "background_path": download_background(input_data.get("background_url"))
+        }
+        
+        # 1. Download
         video_path = download_video(video_url)
         
-        # Download de background (opcional)
-        background_url = input_data.get("background_url")
-        background_path = download_background(background_url) if background_url else None
+        # 2. Definição de Cortes (Auto ou Manual)
+        cuts_to_process = []
         
-        # Configuração
-        config = {
-            "cutType": input_data.get("cutType", "manual"),
-            "antiShadowban": input_data.get("antiShadowban", False),
-            "generateTitles": input_data.get("generateTitles", False),
-            "titulo": input_data.get("animeName", "Anime"),
-            "titleStyle": input_data.get("titleStyle", {}),
-            "background_path": background_path
-        }
+        if config["cutType"] == "auto" and AI_AVAILABLE:
+            logger.info("🤖 Iniciando Modo Automático (IA)...")
+            viral_cuts = analyze_video_content(video_path, config["animeName"])
+            if viral_cuts:
+                cuts_to_process = viral_cuts
+            else:
+                logger.warning("⚠️ IA não encontrou cortes, fallback para manual")
+                config["cutType"] = "manual"
         
-        # Processamento
-        cuts = process_video(video_path, config)
+        if config["cutType"] != "auto" or not cuts_to_process:
+            # Manual fallback
+            duration = VideoFileClip(video_path).duration
+            for i in range(min(5, int(duration/60))):
+                cuts_to_process.append({
+                    "start": i*60, 
+                    "end": min((i+1)*60, duration),
+                    "title": config["animeName"]
+                })
         
-        # Limpeza
-        try:
-            os.remove(video_path)
-            if background_path:
-                os.remove(background_path)
-        except:
-            pass
+        # 3. Renderização
+        results = []
+        for i, cut in enumerate(cuts_to_process):
+            out_path = processar_corte(video_path, cut, i+1, config)
+            b2_url = upload_to_b2(out_path)
+            
+            results.append({
+                "path": out_path,
+                "url": b2_url,
+                "title": cut.get("title"),
+                "score": cut.get("score", 0)
+            })
+            
+            # Limpa temp file do corte para economizar espaço
+            # Mas mantemos para retorno local se precisar
+            
+        # Cleanup video original
+        try: os.remove(video_path)
+        except: pass
         
-        # Resultado
-        result = {
-            "status": "success",
-            "message": f"{len(cuts)} cortes gerados com sucesso",
-            "cuts": cuts,
-            "config": config
-        }
-        
-        logger.info(f"✅ Job completo: {len(cuts)} cortes")
-        return result
+        return {"status": "success", "cuts": results}
         
     except Exception as e:
-        logger.error(f"❌ Erro no handler: {e}", exc_info=True)
-        return {
-            "status": "error",
-            "error": str(e),
-            "type": type(e).__name__
-        }
+        logger.error(f"❌ Fatal error: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
 
-# ==================== INICIALIZAÇÃO ====================
 if __name__ == "__main__":
-    logger.info("🎬 Iniciando AnimeCut Serverless Worker...")
-    logger.info(f"📊 MoviePy: {MOVIEPY_AVAILABLE}")
-    logger.info(f"📊 PIL: {PIL_AVAILABLE}")
-    logger.info(f"📊 B2: {B2_AVAILABLE}")
+    print("--- INICIANDO WORKER ---")
+    sys.stdout.flush()
     
-    runpod.serverless.start({"handler": handler})
-    logger.info("✅ Worker iniciado!")
+    try:
+        runpod.serverless.start({"handler": handler})
+    except Exception as e:
+        print(f"CRITICAL ERROR IN RUNPOD START: {e}")
+        sys.stdout.flush()
+    
+    print("--- WORKER TERMINOU INESPERADAMENTE ---")
+    sys.stdout.flush()
+    
+    # Previne exit code 0 imediato se o runpod falhar
+    while True:
+        time.sleep(10)
