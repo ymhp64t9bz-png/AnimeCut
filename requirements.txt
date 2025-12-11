@@ -30,9 +30,9 @@ scipy>=1.11.0
 
 
 # ==================== WHISPER ====================
-# ==================== WHISPER ====================
 # Versão estável que funciona bem com Torch 2.3+ e CUDA 12
 faster-whisper==1.0.2
+ctranslate2==3.24.0
 
 # ==================== BACKBLAZE B2 ====================
 boto3>=1.29.0
