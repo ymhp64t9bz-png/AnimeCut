@@ -1,6 +1,7 @@
 # ✂️ AnimeCut Serverless v8.0 - ANTI-CACHE EDITION
 
-FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04
+# Usando imagem base mais recente com CUDA 12.1 para compatibilidade com bibliotecas modernas
+FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 # ==================== FORCE NEW LAYER ====================
 # Mudamos o nome da variavel para garantir que nao existe hash igual

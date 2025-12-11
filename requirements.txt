@@ -19,15 +19,19 @@ pydub>=0.25.1
 soundfile>=0.12.1
 
 # ==================== AI CORE ====================
-torch>=2.1.0
-torchvision>=0.16.0
-torchaudio>=2.1.0
-transformers>=4.38.0
-accelerate>=0.27.0
+# ==================== AI CORE ====================
+# Forçando versoes compativeis com CUDA 12.1
+torch==2.3.0
+torchvision==0.18.0
+torchaudio==2.3.0
+transformers>=4.40.0
+accelerate>=0.29.0
 scipy>=1.11.0
 
 # ==================== WHISPER ====================
-faster-whisper>=0.10.0
+# ==================== WHISPER ====================
+# Versão estável que funciona bem com Torch 2.3+ e CUDA 12
+faster-whisper==1.0.2
 
 # ==================== BACKBLAZE B2 ====================
 boto3>=1.29.0
