@@ -1,0 +1,4 @@
+# AnimeCut - Requirements MÍNIMO para teste
+# Apenas o essencial para o worker iniciar
+
+runpod>=1.5.0

@@ -1,21 +1,42 @@
-# AnimeCut Serverless - Dockerfile Ultra Simples
+# AnimeCut Serverless - Dockerfile Funcional
+# Versão sem HEALTHCHECK (que causava crash)
 
 FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04
 
-# Variáveis de ambiente
+# ==================== VARIÁVEIS DE AMBIENTE ====================
 ENV PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Workdir
+# ==================== DEPENDÊNCIAS DO SISTEMA ====================
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    libgomp1 \
+    libgl1 \
+    libglib2.0-0 \
+    libsndfile1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# ==================== WORKDIR ====================
 WORKDIR /app
 
-# Instalar apenas runpod
-RUN pip install --no-cache-dir runpod
+# ==================== CRIAR DIRETÓRIOS ====================
+RUN mkdir -p /tmp/animecut /tmp/animecut/output
 
-# Copiar handler
+# ==================== INSTALAR DEPENDÊNCIAS PYTHON ====================
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip cache purge
+
+# ==================== COPIAR CÓDIGO ====================
 COPY handler.py .
 
-# Sem healthcheck (pode estar causando o crash)
-# HEALTHCHECK DISABLED
+# ==================== SEM HEALTHCHECK (CAUSAVA CRASH) ====================
+# HEALTHCHECK REMOVIDO INTENCIONALMENTE
 
-# Comando
+# ==================== COMANDO ====================
 CMD ["python3", "-u", "handler.py"]
