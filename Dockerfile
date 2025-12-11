@@ -4,8 +4,8 @@
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 # ==================== FORCE NEW LAYER ====================
-# Mudamos o nome da variavel para garantir que nao existe hash igual
-ENV BUILD_DATE="2025-12-11_ANTI_CACHE_V8"
+# Mudamos o nome da variavel para garantir que nao existe hash igual (CACHE BUSTER)
+ENV BUILD_DATE="2025-12-11_FORCE_REBUILD_V9"
 
 # ==================== DEBUG ====================
 # Instala algo inutil so para mudar o hash da imagem
@@ -18,6 +18,8 @@ ENV HF_HOME="/runpod-volume/.cache/huggingface"
 
 # ==================== DEPENDÊNCIAS ====================
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3-dev \
     ffmpeg \
     libsm6 \
     libxext6 \

@@ -31,6 +31,8 @@ scipy>=1.11.0
 
 # ==================== WHISPER ====================
 # Downgrade para 0.10.1 para suportar ctranslate2 3.x (compatível com cuDNN 8)
+# Forçamos uma versão do av que tenha binários (wheel) para evitar compilação
+av==11.0.0
 faster-whisper==0.10.1
 ctranslate2==3.24.0
 
