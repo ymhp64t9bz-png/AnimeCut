@@ -98,10 +98,11 @@ try:
     import boto3
     from botocore.client import Config
     
-    B2_KEY_ID = os.getenv("B2_KEY_ID", "")
-    B2_APP_KEY = os.getenv("B2_APP_KEY", "")
-    B2_ENDPOINT = os.getenv("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
-    B2_BUCKET = os.getenv("B2_BUCKET_NAME", "autocortes-storage")
+    # Credenciais Hardcoded (Solicitado pelo Usuario)
+    B2_KEY_ID = "68702c2cbfc6" 
+    B2_APP_KEY = "00506496bc1450b6722b672d9a43d00605f17eadd7"
+    B2_ENDPOINT = "https://s3.us-east-005.backblazeb2.com"
+    B2_BUCKET = "KortexClipAI2"
     
     if B2_KEY_ID and B2_APP_KEY:
         s3_client = boto3.client(
