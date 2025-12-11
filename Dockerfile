@@ -17,7 +17,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
 
 # ==================== DEPENDÊNCIAS ====================
+# Adicionando dependências explicitas do CUDNN para evitar erros de loading
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    libcudnn9-cuda-12 \
+
     ffmpeg \
     libsm6 \
     libxext6 \
