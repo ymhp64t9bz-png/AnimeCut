@@ -19,11 +19,10 @@ pydub>=0.25.1
 soundfile>=0.12.1
 
 # ==================== AI CORE ====================
-# ==================== AI CORE ====================
-# Forçando versoes compativeis com CUDA 12.1
-torch==2.3.0
-torchvision==0.18.0
-torchaudio==2.3.0
+# Usando PyTorch 2.1.0 que é compatível com cuDNN 8.9 (já presente na imagem base)
+torch==2.1.0
+torchvision==0.16.0
+torchaudio==2.1.0
 transformers>=4.40.0
 accelerate>=0.29.0
 scipy>=1.11.0
