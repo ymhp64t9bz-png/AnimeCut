@@ -28,8 +28,6 @@ RUN pip install --upgrade pip
 
 # ==================== 2. ARSENAL PYTHON ====================
 
-# ==================== 2. ARSENAL PYTHON (OTIMIZADO) ====================
-
 # Utilitários Básicos
 RUN pip install --no-cache-dir \
     runpod>=1.6.0 \
@@ -38,13 +36,11 @@ RUN pip install --no-cache-dir \
     tqdm \
     colorama
 
-# 1. FIX DE VERSÃO E MÍDIA
-# OpenCV novo exige Numpy 2.0, o que quebra PyTorch. Fixamos versões seguras.
+# Mídia & Visão (MoviePy 2.0 + YOLO Anime + OpenCV)
 RUN pip install --no-cache-dir \
-    "numpy<2.0" \
-    "opencv-python-headless<=4.9.0.80" \
     "moviepy>=2.0.0.dev2" \
     imageio-ffmpeg>=0.5.1 \
+    opencv-python-headless \
     Pillow \
     librosa \
     soundfile \
@@ -55,17 +51,16 @@ RUN pip install --no-cache-dir \
 RUN pip install --no-cache-dir deepfilternet
 
 # ==================== 3. INSANELY FAST WHISPER STACK ====================
-# Instala as dependências para pipeline
+# Instala as dependências para usar Flash Attention 2 e Transformers otimizados
 RUN pip install --no-cache-dir \
     transformers \
     optimum \
     accelerate \
-    scipy \
-    insanely-fast-whisper
+    scipy
 
-# 2. FLASH ATTENTION (PRÉ-COMPILADO) - O Pulo do Gato para Build Rápido
-# Baixa wheel pronto para PyTorch 2.2 + CUDA 12.x + Python 3.10
-RUN pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.5.6/flash_attn-2.5.6+cu122torch2.2cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
+# COMPILAÇÃO CRÍTICA DO FLASH ATTENTION 2
+# Isso pode demorar uns minutos no build, mas garante velocidade extrema no Whisper.
+RUN pip install --no-cache-dir --no-build-isolation flash-attn
 
 # ==================== 4. TOOLS PRO (Upscale) ====================
 RUN pip install --no-cache-dir \
