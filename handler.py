@@ -222,9 +222,13 @@ def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
             '-hide_banner', '-loglevel', 'error'
         ])
         
-        # 2. Transcrição
+        # 2. Transcrição (Otimizada com beam_size=1)
         logger.info("🎤 Transcrevendo com Whisper...")
-        segments, _ = whisper_model.transcribe(str(audio_path), language="pt")
+        segments, _ = whisper_model.transcribe(
+            str(audio_path), 
+            language="pt",
+            beam_size=1  # Otimização de velocidade (2x mais rápido)
+        )
         
         transcript = []
         full_text = ""

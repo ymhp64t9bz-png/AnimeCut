@@ -38,6 +38,13 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# ==================== MODEL BAKING (OTIMIZAÇÃO) ====================
+# Cria diretório de cache
+RUN mkdir -p /runpod-volume/.cache/huggingface
+
+# "Assa" o modelo Whisper na imagem para start instantâneo (sem download no boot)
+RUN python3 -c "from faster_whisper import WhisperModel; WhisperModel('large-v3', download_root='/runpod-volume/.cache/huggingface')"
+
 # ==================== CÓDIGO ====================
 COPY handler.py .
 
