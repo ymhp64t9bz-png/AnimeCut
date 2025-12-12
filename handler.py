@@ -22,7 +22,7 @@ from typing import List, Dict, Optional, Tuple
 import random
 
 # --- CONFIGURAÇÃO DE AMBIENTE ---
-sys.path.append("/runpod-volume/models") 
+sys.path.append("/runpod-volume/site-packages") 
 sys.path.append("/runpod-volume")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
