@@ -30,9 +30,10 @@ scipy>=1.11.0
 
 
 # ==================== WHISPER ====================
-# Versão 1.0.3 é compatível com ctranslate2 3.x E usa av com wheels disponíveis
+# faster-whisper 1.0.3 requer ctranslate2>=4.0
+# ctranslate2 4.4.0 é a primeira versão 4.x compatível com CUDA 12 + cuDNN 8.9
 faster-whisper==1.0.3
-ctranslate2==3.24.0
+ctranslate2==4.4.0
 
 # ==================== BACKBLAZE B2 ====================
 boto3>=1.29.0
