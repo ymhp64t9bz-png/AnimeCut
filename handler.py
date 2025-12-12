@@ -114,9 +114,9 @@ try:
     import boto3
     from botocore.client import Config
     
-    B2_KEY_ID = os.environ.get("B2_KEY_ID", "00568702c2cbfc60000000001")
-    B2_APP_KEY = os.environ.get("B2_APPLICATION_KEY", "K005aP6cXPuBIw6IakBaMHYtXx4VGq")
-    B2_ENDPOINT = os.environ.get("B2_ENDPOINT", "https://tree-iad1-0002.secure.backblaze.com/b2_browse_files2.htm?bucketId=76b8a7e0b23c02ec9bbf0c16")
+    B2_KEY_ID = os.environ.get("B2_KEY_ID", "00568702c2cbfc60000000002")
+    B2_APP_KEY = os.environ.get("B2_APPLICATION_KEY", "K005W2f9Ske24aextx8LwxMRxsoYnNE")
+    B2_ENDPOINT = os.environ.get("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
     B2_BUCKET = os.environ.get("B2_BUCKET_NAME", "KortexAI")
     
     if B2_KEY_ID and B2_APP_KEY:
