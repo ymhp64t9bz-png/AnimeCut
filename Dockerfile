@@ -1,37 +1,30 @@
-# ✂️ AnimeCut Serverless V2 TURBO - CORRIGIDO
-# Base Image com PyTorch 2.2.1 + CUDA 12.1
+# ✂️ AnimeCut Serverless V3 FINAL
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
-# Diretório
 WORKDIR /app
 
-# Cache & Vars
-ENV BUILD_DATE="2025-12-12_TURBO_V2_FIX"
+# Mude isso para forçar o RunPod a ler o novo arquivo
+ENV BUILD_DATE="V3_FINAL_FIX_CACHE" 
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
 
-# ==================== 1. DEPENDÊNCIAS DE SISTEMA ====================
+# 1. Sistema
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    python3-dev \
-    pkg-config \
-    ffmpeg \
-    libsndfile1 \
-    libgl1 \
-    libglib2.0-0 \
-    git \
-    nano \
+    build-essential python3-dev pkg-config ffmpeg libsndfile1 \
+    libgl1 libglib2.0-0 git nano \
     && rm -rf /var/lib/apt/lists/*
 
-# Atualiza pip
 RUN pip install --upgrade pip
 
-# ==================== 2. SEGURANÇA DE VERSÃO (CRÍTICO) ====================
-# Instalamos isso PRIMEIRO para evitar conflito entre OpenCV e PyTorch
+# 2. Segurança Numpy (Vital para OpenCV)
 RUN pip install --no-cache-dir "numpy<2.0"
 
-# ==================== 3. ARSENAL PYTHON ====================
+# 3. Flash Attention (A CORREÇÃO MÁGICA - VIA WHEEL)
+# Se o log mostrar "Building wheel for flash-attn" de novo, o RunPod não pegou esse arquivo!
+RUN pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.5.6/flash_attn-2.5.6+cu122torch2.2cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
+
+# 4. Arsenal Python
 RUN pip install --no-cache-dir \
     runpod>=1.6.0 \
     boto3>=1.34.0 \
@@ -48,29 +41,22 @@ RUN pip install --no-cache-dir \
     proglog>=0.1.10 \
     deepfilternet
 
-# ==================== 4. INSANELY FAST WHISPER (TURBO) ====================
+# 5. Whisper & IA
 RUN pip install --no-cache-dir \
     transformers \
     optimum \
     accelerate \
-    scipy
+    scipy \
+    insanely-fast-whisper
 
-# --- CORREÇÃO DO FLASH ATTENTION (O SEGREDO DA VELOCIDADE) ---
-# Em vez de compilar, baixamos o binário pronto para Torch 2.2 + CUDA 12
-RUN pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.5.6/flash_attn-2.5.6+cu122torch2.2cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
-
-# Instala o Wrapper do Insanely Fast Whisper
-RUN pip install --no-cache-dir insanely-fast-whisper
-
-# ==================== 5. TOOLS PRO (Upscale) ====================
+# 6. Tools Pro
 RUN pip install --no-cache-dir \
     basicsr>=1.4.2 \
     facexlib>=0.2.5 \
     gfpgan>=1.3.8 \
     realesrgan>=0.3.0
 
-# ==================== 6. CÓDIGO E INICIALIZAÇÃO ====================
-# Pré-carrega YOLO
+# 7. Setup Final
 RUN python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 
 COPY handler.py .
