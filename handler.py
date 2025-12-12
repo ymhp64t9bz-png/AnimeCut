@@ -53,33 +53,47 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Visão limitada: {e}")
 
-# 2. MoviePy V2 (Sintaxe Nova) + Compatibilidade
+# 2. MoviePy (Detecção de Versão Robusta)
 MOVIEPY_AVAILABLE = False
 MOVIEPY_V2 = False
+
 try:
-    # Tenta MoviePy v2 primeiro
-    from moviepy import *
-    from moviepy.video.io.VideoFileClip import VideoFileClip
-    from moviepy.video.VideoClip import ImageClip, ColorClip, TextClip
-    from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
-    from moviepy.audio.io.AudioFileClip import AudioFileClip
-    from moviepy.video.fx import MirrorX, GammaCorr, MultiplyColor
-    MOVIEPY_AVAILABLE = True
-    MOVIEPY_V2 = True
-    logger.info("✅ MoviePy v2 carregado")
-except ImportError:
-    try:
-        # Fallback para MoviePy v1
+    import moviepy
+    logger.info(f"🎞️ MoviePy Versão Instalada: {moviepy.__version__}")
+    
+    # Verifica se é versão 2.0+
+    if moviepy.__version__.startswith('2'):
+        MOVIEPY_V2 = True
+        from moviepy import *
+        from moviepy.video.io.VideoFileClip import VideoFileClip
+        from moviepy.video.VideoClip import ImageClip, ColorClip, TextClip
+        from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
+        from moviepy.audio.io.AudioFileClip import AudioFileClip
+        # Importa efeitos da V2
+        from moviepy.video.fx import MirrorX, GammaCorr, MultiplyColor
+        logger.info("✅ MoviePy v2 Configurado com Sucesso")
+    else:
+        # Fallback para v1
+        MOVIEPY_V2 = False
         from moviepy.editor import (
             VideoFileClip, ImageClip, CompositeVideoClip,
             ColorClip, TextClip, AudioFileClip
         )
         from moviepy.video.fx.all import mirror_x, gamma_corr, colorx
+        logger.info("✅ MoviePy v1 Configurado (Legado)")
+        
+    MOVIEPY_AVAILABLE = True
+
+except ImportError as e:
+    logger.error(f"❌ Erro Crítico ao importar MoviePy: {e}")
+    # Tenta um fallback desesperado se a detecção falhar mas a lib existir
+    try:
+        from moviepy.editor import *
         MOVIEPY_AVAILABLE = True
         MOVIEPY_V2 = False
-        logger.info("✅ MoviePy v1 carregado (compatibilidade)")
-    except ImportError as e:
-        logger.error(f"❌ MoviePy não disponível: {e}")
+        logger.warning("⚠️ MoviePy carregado via fallback genérico (v1 presumida)")
+    except:
+        pass
 
 # 3. IA (Transformers/Torch)
 AI_AVAILABLE = False
@@ -676,12 +690,24 @@ def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> 
         
         logger.info(f"🎬 Renderizando Corte {num}: {start:.1f}-{end:.1f} ({config.get('animeName')})")
         
-        # Carrega vídeo com sintaxe compatível
+        # Carrega o vídeo de forma agnóstica (funciona na v1 e v2)
         if MOVIEPY_V2:
+            from moviepy.video.io.VideoFileClip import VideoFileClip
             video = VideoFileClip(video_path)
+        else:
+            # Tenta importar localmente caso o global tenha falhado
+            try:
+                from moviepy.editor import VideoFileClip
+            except ImportError:
+                from moviepy.video.io.VideoFileClip import VideoFileClip
+            video = VideoFileClip(video_path)
+
+        # Verifica dinamicamente qual método de corte usar
+        if hasattr(video, 'subclipped'):
+            # Sintaxe MoviePy v2
             clip = video.subclipped(start, end)
         else:
-            video = VideoFileClip(video_path)
+            # Sintaxe MoviePy v1
             clip = video.subclip(start, end)
         
         # Anti-Shadowban
