@@ -591,11 +591,26 @@ def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> 
             else:
                 bg_clip = ColorClip(size=(target_w, target_h), color=(15,15,30)).set_duration(clip.duration)
             
-            # Vídeo Fit
-            scale = min(target_w / clip.w, target_h / clip.h)
-            if clip.w * (target_h/clip.h) < target_w: scale = target_w / clip.w # Cover
+            # ZOOM TÁTICO (Anti-Shadowban Visual)
+            # Corta bordas para evitar reconhecimento por pixel
+            zoom_factor = 1.2 # 20% de zoom (Personagem maior)
             
-            clip_resized = clip.resize(scale)
+            w, h = clip.w, clip.h
+            new_w = w / zoom_factor
+            new_h = h / zoom_factor
+            
+            # Crop central
+            # x1, y1 é o canto superior esquerdo do crop
+            x1 = w/2 - new_w/2
+            y1 = h/2 - new_h/2
+            
+            clip_cropped = clip.crop(x1=x1, y1=y1, width=new_w, height=new_h)
+            
+            # Agora redimensiona para caber na largura (Cover logic)
+            # Para preencher 1080px de largura
+            scale = target_w / clip_cropped.w 
+            
+            clip_resized = clip_cropped.resize(scale)
             clip_pos = clip_resized.set_position(('center', 'center'))
             
             layers = [bg_clip, clip_pos]
