@@ -35,8 +35,11 @@ WORKDIR /app
 COPY requirements.txt .
 
 # --no-cache-dir é vital para garantir downloads frescos
+# CRUTCH FIX: Desativamos o isolamento de build (--no-build-isolation) para obrigar
+# o uso do Cython<3. Isso corrige a falha de compilação do 'av' antigo.
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install "Cython<3" wheel setuptools && \
+    pip install --no-cache-dir --no-build-isolation -r requirements.txt
 
 # ==================== MODEL BAKING (OTIMIZAÇÃO) ====================
 # Cria diretório de cache
