@@ -9,14 +9,24 @@ ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
 
-# Bibliotecas essenciais de runtime (FFmpeg, fontes, opencv libs)
+# Bibliotecas essenciais de runtime E BUILD (necessário para compilar av 10.x)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3-dev \
+    pkg-config \
     ffmpeg \
     libsm6 \
     libxext6 \
     libgl1 \
     fonts-dejavu-core \
     imagemagick \
+    libavformat-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libswscale-dev \
+    libswresample-dev \
+    libavfilter-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

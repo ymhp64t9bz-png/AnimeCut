@@ -1,10 +1,10 @@
 # ==================== CORE SYSTEM ====================
 runpod>=1.6.0
 
-# ==================== PROCESSAMENTO DE VÍDEO (A CORREÇÃO) ====================
-# PyAV 12.3.0 -> Versão moderna com binários pré-compilados (Wheels).
-# Resolve o problema de "gcc failed" ou "pkg-config" e funciona com faster-whisper.
-av==12.3.0
+# ==================== PROCESSAMENTO DE VÍDEO ====================
+# Deixamos o pip decidir a versão do 'av' compatível com faster-whisper (será a 10.x)
+# Fixamos Cython<3 para evitar erros de compilação conhecidos no 'av' antigo
+Cython<3
 
 # Ferramentas de vídeo
 moviepy==1.0.3
