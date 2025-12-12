@@ -53,18 +53,46 @@ FONT_PATH = VOLUME_PATH / "fonts" / "impact.ttf"
 FONT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # ==================== IMPORTS CONDICIONAIS ====================
+# ==================== IMPORTS CONDICIONAIS ====================
 try:
-    from moviepy.editor import (
-        VideoFileClip, ImageClip, CompositeVideoClip,
-        ColorClip, TextClip, AudioFileClip
+    # SINTAXE NOVA DO MOVIEPY v2.0+
+    from moviepy import (
+        VideoFileClip, 
+        ImageClip, 
+        CompositeVideoClip, 
+        ColorClip,
+        TextClip,
+        AudioFileClip
     )
-    from moviepy.video.fx.all import speedx
-    import numpy as np
+    # Efeitos agora ficam em moviepy.video.fx
+    import moviepy.video.fx as vfx 
+    
     MOVIEPY_AVAILABLE = True
-    logger.info("✅ MoviePy disponível")
-except ImportError as e:
-    MOVIEPY_AVAILABLE = False
-    logger.error(f"❌ MoviePy não disponível: {e}")
+    logger.info("✅ MoviePy carregado com sucesso")
+except ImportError:
+    # Tenta sintaxe antiga (v1.x) como fallback
+    try:
+        from moviepy.editor import (
+            VideoFileClip, 
+            ImageClip, 
+            CompositeVideoClip, 
+            ColorClip,
+            TextClip,
+            AudioFileClip
+        )
+        from moviepy.video.fx.all import speedx
+        # Mapeia speedx para vfx para manter compatibilidade no código
+        class VFXStub:
+            def speedx(self, clip, factor): return speedx(clip, factor)
+            def mirror_x(self, clip): return clip.fx(vfx.mirror_x) 
+            # Adicione outros stubs se necessário, mas speedx é o principal usado
+        vfx = VFXStub()
+        
+        MOVIEPY_AVAILABLE = True
+        logger.info("✅ MoviePy (Legacy) carregado com sucesso")
+    except ImportError as e:
+        MOVIEPY_AVAILABLE = False
+        logger.error(f"❌ Erro ao importar MoviePy: {e}")
 
 try:
     from PIL import Image, ImageDraw, ImageFont, ImageColor
@@ -77,7 +105,7 @@ except ImportError as e:
 try:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
-    from faster_whisper import WhisperModel
+    # REMOVIDO: from faster_whisper import WhisperModel (Migramos para Insanely-Fast)
     
     GPU_AVAILABLE = torch.cuda.is_available()
     DEVICE = "cuda" if GPU_AVAILABLE else "cpu"
@@ -86,7 +114,7 @@ try:
         logger.info(f"✅ GPU Detectada: {torch.cuda.get_device_name(0)}")
         logger.info(f"💾 VRAM Total: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
     else:
-        logger.warning("⚠️ GPU NÃO detectada, processamento será lento!")
+        logger.warning("⚠️ GPU NÃO detectada")
         
     AI_AVAILABLE = True
 except ImportError as e:

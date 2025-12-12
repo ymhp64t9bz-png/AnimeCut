@@ -1,10 +1,10 @@
-# ✂️ AnimeCut Serverless V3 FINAL
+# ✂️ AnimeCut Serverless V3 FINAL - NUMPY SHIELDED
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 WORKDIR /app
 
 # Mude isso para forçar o RunPod a ler o novo arquivo
-ENV BUILD_DATE="V3_FINAL_FIX_CACHE" 
+ENV BUILD_DATE="V3_FINAL_FIX_NUMPY_SHIELD" 
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
@@ -17,11 +17,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN pip install --upgrade pip
 
-# 2. Segurança Numpy (Vital para OpenCV)
-RUN pip install --no-cache-dir "numpy<2.0"
+# 2. Segurança Numpy (Vital para OpenCV e PyTorch 2.2)
+# Forçamos a versão 1.26.4 que é a última estável da série 1.x
+RUN pip install --no-cache-dir "numpy==1.26.4"
 
 # 3. Flash Attention (A CORREÇÃO MÁGICA - VIA WHEEL)
-# Se o log mostrar "Building wheel for flash-attn" de novo, o RunPod não pegou esse arquivo!
 RUN pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.5.6/flash_attn-2.5.6+cu122torch2.2cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 
 # 4. Arsenal Python
@@ -56,7 +56,11 @@ RUN pip install --no-cache-dir \
     gfpgan>=1.3.8 \
     realesrgan>=0.3.0
 
-# 7. Setup Final
+# 7. Setup Final e BLINDAGEM FINAL DE NUMPY
+# Reinstalamos numpy 1.26.4 forçadamente no final para garantir que nenhuma lib acima (como pandas/transformers) atualizou ele para 2.0
+RUN pip install "numpy==1.26.4" --force-reinstall
+
+# Pré-carrega YOLO
 RUN python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 
 COPY handler.py .
