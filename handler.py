@@ -88,11 +88,11 @@ try:
     import boto3
     from botocore.client import Config
     
-    # Credenciais com Fallback
-    B2_KEY_ID = os.environ.get("B2_KEY_ID", "68702c2cbfc6")
-    B2_APP_KEY = os.environ.get("B2_APPLICATION_KEY", "00506496bc1450b6722b672d9a43d00605f17eadd7")
+    # Credenciais com Fallback (valores atualizados conforme RunPod)
+    B2_KEY_ID = os.environ.get("B2_KEY_ID", "00568702c2cbfc60000000001")
+    B2_APP_KEY = os.environ.get("B2_APPLICATION_KEY", "K005aP6cXPuBIw6IakBaMHYtXx4VGq")
     B2_ENDPOINT = os.environ.get("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
-    B2_BUCKET = os.environ.get("B2_BUCKET_NAME", "KortexClipAI") # Corrigido para KortexClipAI
+    B2_BUCKET = os.environ.get("B2_BUCKET_NAME", "KortexAI")  # Corrigido para KortexAI
     
     if B2_KEY_ID and B2_APP_KEY:
         s3_client = boto3.client(
