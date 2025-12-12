@@ -30,8 +30,8 @@ scipy>=1.11.0
 
 
 # ==================== WHISPER ====================
-# Downgrade para 0.10.1 para suportar ctranslate2 3.x (compatível com cuDNN 8)
-faster-whisper==0.10.1
+# Versão 1.0.3 é compatível com ctranslate2 3.x E usa av com wheels disponíveis
+faster-whisper==1.0.3
 ctranslate2==3.24.0
 
 # ==================== BACKBLAZE B2 ====================
