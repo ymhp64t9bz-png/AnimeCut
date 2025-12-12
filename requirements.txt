@@ -6,22 +6,18 @@ runpod>=1.6.0
 # Fixamos Cython<3 para evitar erros de compilação conhecidos no 'av' antigo
 Cython<3
 
-# Ferramentas de vídeo
-moviepy==1.0.3
-imageio==2.34.1
-imageio-ffmpeg==0.5.1
-opencv-python-headless==4.9.0.80
-proglog==0.1.10
+# Atualizado para evitar erro 'numpy.int' com numpy 1.26+
+moviepy>=2.0.0.dev2
+imageio>=2.34.1
+imageio-ffmpeg>=0.5.1
+opencv-python-headless>=4.9.0.80
+proglog>=0.1.10
 
 # ==================== IA & INFERÊNCIA (STACK CUDNN 8) ====================
-# PyTorch 2.3.0 (Traz cuDNN 8.9.2 automaticamente)
-torch==2.3.0 --index-url https://download.pytorch.org/whl/cu121
-torchvision==0.18.0 --index-url https://download.pytorch.org/whl/cu121
-torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121
+# PyTorch: Usamos a versão da imagem base do RunPod (economia de tempo/espaço)
+# NÃO INSTALAR TORCH AQUI
 
 # Faster Whisper 0.10.1 + CTranslate2 3.24.0
-# Esta combinação roda NATIVAMENTE no cuDNN 8.9 do PyTorch.
-# Não tenta buscar cuDNN 9 inexistente.
 faster-whisper==0.10.1
 ctranslate2==3.24.0
 
