@@ -1,38 +1,46 @@
-# ==================== CORE SYSTEM ====================
+# ✂️ AnimeCut Serverless v12 ULTIMATE Requirements
+# Este arquivo prioriza estabilidade e velocidade de build
+
+# ==================== CORE ====================
 runpod>=1.6.0
+requests>=2.31.0
+tqdm>=4.66.4
+colorama
+
+# ==================== NUMPY SHIELD (CRÍTICO) ====================
+# Deve ser < 2.0 para compatibilidade com PyTorch e OpenCV atuais
+numpy==1.26.4
 
 # ==================== PROCESSAMENTO DE VÍDEO ====================
-# Deixamos o pip decidir a versão do 'av' compatível com faster-whisper (será a 10.x)
-# Fixamos Cython<3 para evitar erros de compilação conhecidos no 'av' antigo
-Cython<3
-
-# Atualizado para evitar erro 'numpy.int' com numpy 1.26+
+# MoviePy v2 (Dev) para melhor performance e menos bugs com numpy novo
 moviepy>=2.0.0.dev2
 imageio>=2.34.1
 imageio-ffmpeg>=0.5.1
+# OpenCV Headless para ambiente servidor
 opencv-python-headless>=4.9.0.80
-proglog>=0.1.10
 
-# ==================== IA & INFERÊNCIA (STACK CUDNN 8) ====================
-# PyTorch: Usamos a versão da imagem base do RunPod (economia de tempo/espaço)
-# NÃO INSTALAR TORCH AQUI
+# ==================== IA & VISÃO (STACK TURBO) ====================
+# YOLO para Detecção de Rostos e Smart Crop
+ultralytics
 
-# Faster Whisper 0.10.1 + CTranslate2 3.24.0
-faster-whisper==0.10.1
-ctranslate2==3.24.0
+# Limpeza de Áudio Profissional
+deepfilternet
 
-# Transformers & LLM
-transformers==4.41.2
-accelerate==0.30.1
-scipy==1.13.1
+# Transcrição Acelerada (Flash Attention requer GPU, aqui usamos fallback CPU-safe)
+# insanely-fast-whisper instala transformers e torch, cuidaremos para usar versões compatíveis
+insanely-fast-whisper
+transformers>=4.40.0
+accelerate>=0.30.0
+optimum
+scipy
 
-# ==================== UTILITÁRIOS & REDE ====================
+# ==================== OUTROS ====================
 boto3>=1.34.0
 botocore>=1.34.0
-requests>=2.31.0
-tqdm>=4.66.4
-Pillow==10.3.0
-numpy==1.26.4
-decorator==4.4.2
-pydub>=0.25.1
+Pillow>=10.3.0
 soundfile>=0.12.1
+decorator>=4.4.2
+librosa
+
+# Utilitários de compilação
+Cython<3
