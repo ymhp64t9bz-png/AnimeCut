@@ -23,6 +23,9 @@ import random
 try:
     import cv2
     import numpy as np
+    import torch
+    from transformers import pipeline
+    from ultralytics import YOLO
     CV2_AVAILABLE = True
 except ImportError:
     CV2_AVAILABLE = False
@@ -141,16 +144,65 @@ whisper_model = None
 qwen_model = None
 qwen_tokenizer = None
 
-def load_whisper():
-    """Carrega Whisper na GPU"""
-    global whisper_model
-    if whisper_model is None and AI_AVAILABLE:
+# ==================== FUNÇÕES TURBO (YOLO + DEEPFILTER) ====================
+def clean_audio_deepfilter(input_path: Path) -> Path:
+    """Limpa áudio usando DeepFilterNet (Remove BGM/Ruído)"""
+    try:
+        output_dir = input_path.parent
+        # Executa DeepFilterNet via CLI (mais estável)
+        # deepFilter retorna arquivo com sufixo _DeepFilterNet3.wav
+        cmd = ["deepFilter", str(input_path), "-o", str(output_dir)]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # Encontra o arquivo gerado
+        cleaned_path = output_dir / f"{input_path.stem}_DeepFilterNet3.wav"
+        if cleaned_path.exists():
+            return cleaned_path
+        return input_path
+    except Exception as e:
+        logger.error(f"⚠️ Erro no DeepFilter: {e}. Usando áudio original.")
+        return input_path
+
+whisper_pipeline = None
+def load_turbo_whisper():
+    """Carrega Insanely-Fast-Whisper (HF Pipeline + Flash Attention 2)"""
+    global whisper_pipeline
+    if whisper_pipeline is None:
         try:
-            logger.info("🎧 Carregando Whisper (Large-v3)...")
-            whisper_model = WhisperModel("large-v3", device=DEVICE, compute_type="float16")
-            logger.info("✅ Whisper carregado")
+            logger.info("🚀 Carregando Whisper V3 com Flash Attention 2...")
+            # Força carregamento se não existir
+            whisper_pipeline = pipeline(
+                "automatic-speech-recognition",
+                model="openai/whisper-large-v3",
+                torch_dtype=torch.float16,
+                device="cuda:0",
+                model_kwargs={"attn_implementation": "flash_attention_2"}
+            )
+            logger.info("✅ Whisper Turbo Carregado!")
         except Exception as e:
-            logger.error(f"❌ Erro ao carregar Whisper: {e}")
+            logger.error(f"❌ Erro ao carregar Whisper Turbo (FA2): {e}")
+            logger.warning("⚠️ Tentando fallback sem Flash Attention...")
+            try:
+                whisper_pipeline = pipeline(
+                    "automatic-speech-recognition",
+                    model="openai/whisper-large-v3",
+                    torch_dtype=torch.float16,
+                    device="cuda:0"
+                )
+            except Exception as e2:
+                logger.error(f"❌ Falha crítica no Whisper: {e2}")
+
+# Cache YOLO
+yolo_model = None
+def get_yolo():
+    global yolo_model
+    if yolo_model is None:
+        try:
+            # Carrega YOLOv8 Nano para detecção de rostos de anime
+            yolo_model = YOLO("yolov8n.pt") 
+        except:
+            yolo_model = None
+    return yolo_model
 
 def load_qwen():
     """Carrega Qwen 2.5 da GPU/Volume"""
@@ -333,40 +385,52 @@ def apply_antishadowban(clip):
 
     return clip
 
-# ==================== IA: ANALISE ====================
+# ==================== IA: ANALISE (TURBO V2) ====================
 def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
-    """Analisa vídeo para encontrar cenas virais"""
+    """Analisa vídeo para encontrar cenas virais (Pipeline Turbo)"""
     try:
-        load_whisper()
+        load_turbo_whisper()
         load_qwen()
         
-        if not whisper_model or not qwen_model:
+        if not whisper_pipeline or not qwen_model:
             raise Exception("Modelos de IA não carregados")
             
-        # 1. Extração de áudio OTIMIZADA
+        # 1. Extração de áudio
         logger.info("🔊 Extraindo áudio para transcrição...")
-        audio_path = TEMP_DIR / f"temp_audio_{uuid.uuid4().hex[:8]}.wav"
+        raw_audio_path = TEMP_DIR / f"temp_audio_{uuid.uuid4().hex[:8]}.wav"
         
         subprocess.run([
             'ffmpeg', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', 
-            '-ar', '16000', '-ac', '1', str(audio_path), '-y', 
+            '-ar', '16000', '-ac', '1', str(raw_audio_path), '-y', 
             '-hide_banner', '-loglevel', 'error'
         ])
         
-        # 2. Transcrição (Otimizada com beam_size=1)
-        logger.info("🎤 Transcrevendo com Whisper...")
-        segments, _ = whisper_model.transcribe(
-            str(audio_path), 
-            language="pt",
-            beam_size=1  # Otimização de velocidade (2x mais rápido)
+        # 1.5 Limpeza de Áudio (DeepFilterNet)
+        logger.info("🧹 Limpando áudio (DeepFilterNet)...")
+        clean_audio_path = clean_audio_deepfilter(raw_audio_path)
+        
+        # 2. Transcrição (Insanely Fast Whisper)
+        logger.info("🎤 Transcrevendo (Flash Attention 2)...")
+        
+        # Parâmetros otimizados para FA2
+        result = whisper_pipeline(
+            str(clean_audio_path),
+            chunk_length_s=30,
+            batch_size=24, # Aumentar batch size graças ao FA2
+            return_timestamps=True,
+            generate_kwargs={"language": "portuguese"} 
         )
+        
+        segments = result.get("chunks", [])
         
         transcript_objs = []
         for seg in segments:
+            # O pipeline retorna estrutura (timestamp=(start, end), text="...")
+            start_t, end_t = seg["timestamp"]
             transcript_objs.append({
-                "start": seg.start,
-                "end": seg.end,
-                "text": seg.text,
+                "start": start_t,
+                "end": end_t,
+                "text": seg["text"],
                 "type": "dialogue"
             })
             
@@ -386,7 +450,7 @@ def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
         # Ordenar tudo por tempo
         transcript_objs.sort(key=lambda x: x["start"])
         
-        # Gerar texto final para o Qwen
+        # Gerar texto final
         full_text = ""
         for item in transcript_objs:
             if item.get("type") == "action":
@@ -394,7 +458,7 @@ def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
             else:
                 full_text += f"[{item['start']:.1f}s - {item['end']:.1f}s] {item['text']}\n"
             
-        logger.info(f"📝 Roteiro Híbrido Gerado: {len(transcript_objs)} eventos (Diálogos + Ação)")
+        logger.info(f"📝 Roteiro Híbrido Gerado: {len(transcript_objs)} eventos")
         
         # 3. Análise com Qwen
         logger.info("🧠 Analisando roteiro com Qwen 2.5...")
@@ -591,23 +655,56 @@ def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> 
             else:
                 bg_clip = ColorClip(size=(target_w, target_h), color=(15,15,30)).set_duration(clip.duration)
             
-            # ZOOM TÁTICO (Anti-Shadowban Visual)
-            # Corta bordas para evitar reconhecimento por pixel
-            zoom_factor = 1.2 # 20% de zoom (Personagem maior)
-            
+            # ZOOM TÁTICO & YOLO SMART CROP (V2 Turbo)
+            zoom_factor = 1.15 # 15% Zoom (Ideal)
             w, h = clip.w, clip.h
             new_w = w / zoom_factor
             new_h = h / zoom_factor
             
-            # Crop central
-            # x1, y1 é o canto superior esquerdo do crop
-            x1 = w/2 - new_w/2
-            y1 = h/2 - new_h/2
+            # Tenta detectar rosto com YOLO para centralizar crop
+            x1, y1 = w/2 - new_w/2, h/2 - new_h/2 # Default (Centro)
             
+            try:
+                yolo = get_yolo()
+                if yolo:
+                    # Analisa frame do meio para decidir enquadramento
+                    frame = clip.get_frame(clip.duration / 2)
+                    results = yolo(frame, verbose=False)
+                    
+                    # Procura 'person' (class 0) com maior área
+                    max_area = 0
+                    best_box = None
+                    
+                    for result in results:
+                        for box in result.boxes:
+                            if int(box.cls) == 0: # Person
+                                xyxy = box.xyxy[0].cpu().numpy()
+                                width = xyxy[2] - xyxy[0]
+                                height = xyxy[3] - xyxy[1]
+                                area = width * height
+                                if area > max_area:
+                                    max_area = area
+                                    best_box = xyxy
+                    
+                    if best_box is not None:
+                        # Centro do rosto
+                        face_cx = (best_box[0] + best_box[2]) / 2
+                        face_cy = (best_box[1] + best_box[3]) / 2
+                        
+                        # Calcula x1, y1 para que face_cx, face_cy fiquem no centro do crop
+                        x1 = face_cx - (new_w / 2)
+                        y1 = face_cy - (new_h / 2)
+                        
+                        # Limites (Clamping) para não sair do vídeo
+                        x1 = max(0, min(x1, w - new_w))
+                        y1 = max(0, min(y1, h - new_h))
+                        logger.info("🎯 YOLO: Rosto detectado! Ajustando crop.")
+            except Exception as e:
+                logger.warning(f"⚠️ Erro no Smart Crop: {e}")
+
             clip_cropped = clip.crop(x1=x1, y1=y1, width=new_w, height=new_h)
             
             # Agora redimensiona para caber na largura (Cover logic)
-            # Para preencher 1080px de largura
             scale = target_w / clip_cropped.w 
             
             clip_resized = clip_cropped.resize(scale)

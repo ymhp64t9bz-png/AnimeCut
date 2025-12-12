@@ -1,18 +1,17 @@
-# ✂️ AnimeCut Serverless v11.0 - PRO EDITION (Zoom Tático + RealESRGAN)
-# Base Image com PyTorch 2.2.1 (Já contém CUDA 12.1 e Python 3.10) - Economia de tempo.
+# ✂️ AnimeCut Serverless V2 TURBO - STATE OF THE ART
+# Base Image com PyTorch 2.2.1 + CUDA 12.1 (Base Solida)
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
-# Define o diretório de trabalho
+# Diretório
 WORKDIR /app
 
-# Cache Data
-ENV BUILD_DATE="2025-12-12_PRO_V1"
+# Cache & Vars
+ENV BUILD_DATE="2025-12-12_TURBO_V1"
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
 
-# ==================== DEPENDÊNCIAS DE SISTEMA ====================
-# Instala libs para processamento de vídeo/áudio e suporte a build (caso precise compilar av)
+# ==================== 1. DEPENDÊNCIAS DE SISTEMA (FFmpeg, Audio, Build) ====================
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3-dev \
@@ -21,31 +20,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsndfile1 \
     libgl1 \
     libglib2.0-0 \
-    # Libs para OpenCV e PyAV
-    libavformat-dev \
-    libavcodec-dev \
-    libavdevice-dev \
-    libavutil-dev \
-    libswscale-dev \
-    libswresample-dev \
-    libavfilter-dev \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Atualiza o pip
+# Atualiza pip
 RUN pip install --upgrade pip
 
-# ==================== PACOTES PYTHON (Agrupados) ====================
+# ==================== 2. ARSENAL PYTHON ====================
 
-# 1. Infraestrutura e Fix do Cython (Vital para o 'av' antigo)
-RUN pip install "Cython<3" wheel setuptools && \
-    pip install --no-cache-dir \
+# Utilitários Básicos
+RUN pip install --no-cache-dir \
     runpod>=1.6.0 \
     boto3>=1.34.0 \
     requests \
-    tqdm
+    tqdm \
+    colorama
 
-# 2. Processamento de Mídia (Edição de Vídeo)
-# MoviePy 2.0.0.dev2 corrige o erro com Numpy novo
+# Mídia & Visão (MoviePy 2.0 + YOLO Anime + OpenCV)
 RUN pip install --no-cache-dir \
     "moviepy>=2.0.0.dev2" \
     imageio-ffmpeg>=0.5.1 \
@@ -53,36 +44,43 @@ RUN pip install --no-cache-dir \
     Pillow \
     librosa \
     soundfile \
-    decorator>=4.4.2 \
+    ultralytics \
     proglog>=0.1.10
 
-# 3. Inteligência Artificial (Transcrição e Legendas)
-# Desativamos isolamento de build para que o pip use o Cython<3 instalado acima
-RUN pip install --no-cache-dir --no-build-isolation \
-    faster-whisper==0.10.1 \
-    ctranslate2==3.24.0 \
-    transformers>=4.41.2 \
-    accelerate>=0.30.1 \
-    scipy>=1.13.1
+# Áudio Cleaning (DeepFilterNet)
+RUN pip install --no-cache-dir deepfilternet
 
-# 4. Ferramentas PRO (Upscale) - Opcionais, mas instaladas
-# Instala basicsr e realesrgan para quando o plano PRO for ativado
+# ==================== 3. INSANELY FAST WHISPER STACK ====================
+# Instala as dependências para usar Flash Attention 2 e Transformers otimizados
+RUN pip install --no-cache-dir \
+    transformers \
+    optimum \
+    accelerate \
+    scipy
+
+# COMPILAÇÃO CRÍTICA DO FLASH ATTENTION 2
+# Isso pode demorar uns minutos no build, mas garante velocidade extrema no Whisper.
+RUN pip install --no-cache-dir --no-build-isolation flash-attn
+
+# ==================== 4. TOOLS PRO (Upscale) ====================
 RUN pip install --no-cache-dir \
     basicsr>=1.4.2 \
     facexlib>=0.2.5 \
     gfpgan>=1.3.8 \
     realesrgan>=0.3.0
 
-# ==================== MODEL BAKING ====================
-# Cria diretório de cache
+# ==================== 5. MODEL BAKING (CACHE) ====================
+# Cria diretório
 RUN mkdir -p /runpod-volume/.cache/huggingface
 
-# "Assa" o modelo Whisper na imagem para start instantâneo.
-# Aponta para o diretório que será montado ou usado como cache fallback.
-RUN python3 -c "from faster_whisper import WhisperModel; WhisperModel('large-v3', download_root='/runpod-volume/.cache/huggingface')"
+# Baixa YOLOv8n (Nano) para cache (é minúsculo)
+RUN pip install ultralytics && \
+    python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
+
+# Nota: O modelo Whisper V3 via Transformers será baixado na primeira execução ou podemos tentar pré-carregar
+# Mas como insanity-fast-whisper usa pipeline, vamos deixar o handler gerenciar o load inicial via HF_HOME
 
 # ==================== CÓDIGO ====================
 COPY handler.py .
 
-# Inicialização
 CMD [ "python3", "-u", "handler.py" ]
