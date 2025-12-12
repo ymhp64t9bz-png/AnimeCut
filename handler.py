@@ -20,31 +20,6 @@ import subprocess
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
-# ==================== RUNTIME LINKER FIX (MODERN STACK) ====================
-# Garante que o CTranslate2 encontre as libs NVIDIA instaladas via pip (cuDNN 9)
-# Isso evita o erro "cudnnCreateTensorDescriptor" e dependência do sistema host.
-try:
-    import nvidia.cudnn.lib
-    import nvidia.cublas.lib
-    
-    cudnn_path = os.path.dirname(nvidia.cudnn.lib.__file__)
-    cublas_path = os.path.dirname(nvidia.cublas.lib.__file__)
-    
-    # Adiciona ao LD_LIBRARY_PATH em tempo de execução
-    current_ld = os.environ.get("LD_LIBRARY_PATH", "")
-    os.environ["LD_LIBRARY_PATH"] = f"{cudnn_path}:{cublas_path}:{current_ld}"
-    
-    # Adiciona também ao sys.path para garantir carregamento de DLLs
-    if sys.platform != 'win32':
-        sys.path.append(cudnn_path)
-        sys.path.append(cublas_path)
-        
-    print(f"🔧 Runtime Libs Injected: {cudnn_path}")
-except ImportError:
-    print("⚠️ Nvidia Python Libs not found (using system libs)")
-except Exception as e:
-    print(f"⚠️ Runtime Linker Error: {e}")
-
 # ==================== CONFIGURAÇÃO ====================
 logging.basicConfig(
     level=logging.INFO,

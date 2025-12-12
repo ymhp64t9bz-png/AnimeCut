@@ -1,47 +1,42 @@
-# ==================== CORE SYSTEM & ACELERADORES ====================
-# RunPod SDK
+# ==================== CORE SYSTEM ====================
 runpod>=1.6.0
 
-# PyTorch 2.3.0 (Estável para CUDA 12.1)
-# Inclui bibliotecas NVIDIA via PIP para não depender do sistema operacional
+# ==================== PROCESSAMENTO DE VÍDEO (A CORREÇÃO) ====================
+# PyAV 12.3.0 -> Versão moderna com binários pré-compilados (Wheels).
+# Resolve o problema de "gcc failed" ou "pkg-config" e funciona com faster-whisper.
+av==12.3.0
+
+# Ferramentas de vídeo
+moviepy==1.0.3
+imageio==2.34.1
+imageio-ffmpeg==0.5.1
+opencv-python-headless==4.9.0.80
+proglog==0.1.10
+
+# ==================== IA & INFERÊNCIA (STACK CUDNN 8) ====================
+# PyTorch 2.3.0 (Traz cuDNN 8.9.2 automaticamente)
 torch==2.3.0 --index-url https://download.pytorch.org/whl/cu121
 torchvision==0.18.0 --index-url https://download.pytorch.org/whl/cu121
 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121
 
-# Drivers NVIDIA Python (Força o uso de versões modernas dentro do container)
-nvidia-cudnn-cu12==9.1.0.70
-nvidia-cublas-cu12==12.1.3.1
-
-# ==================== IA & INFERÊNCIA ====================
-# Faster Whisper 1.0.3 (Moderno)
-# Utiliza ctranslate2 4.x que é muito mais rápido, mas exigia cuDNN 9 (agora temos via pip)
-faster-whisper==1.0.3
-ctranslate2==4.3.1
+# Faster Whisper 0.10.1 + CTranslate2 3.24.0
+# Esta combinação roda NATIVAMENTE no cuDNN 8.9 do PyTorch.
+# Não tenta buscar cuDNN 9 inexistente.
+faster-whisper==0.10.1
+ctranslate2==3.24.0
 
 # Transformers & LLM
 transformers==4.41.2
 accelerate==0.30.1
 scipy==1.13.1
 
-# ==================== PROCESSAMENTO DE VÍDEO & IMAGEM ====================
-# PyAV 12.0.0 -> ESTE É O SEGREDO.
-# Versões 12.x possuem 'wheels' (binários prontos) para Linux.
-# Isso elimina completamente o erro de "gcc failed" ou "pkg-config missing".
-av==12.0.0
-
-moviepy==1.0.3
-imageio==2.34.1
-imageio-ffmpeg==0.5.1
-opencv-python-headless==4.9.0.80
-Pillow==10.3.0
-numpy==1.26.4
-decorator==4.4.2
-proglog==0.1.10
-
 # ==================== UTILITÁRIOS & REDE ====================
 boto3>=1.34.0
 botocore>=1.34.0
 requests>=2.31.0
 tqdm>=4.66.4
+Pillow==10.3.0
+numpy==1.26.4
+decorator==4.4.2
 pydub>=0.25.1
 soundfile>=0.12.1

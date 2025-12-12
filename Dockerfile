@@ -1,16 +1,15 @@
-# ✂️ AnimeCut Serverless v9.0 - MODERN STACK EDITION
-# Base Image com CUDA 12.1.1 (Perfeita para PyTorch 2.3+)
+# ✂️ AnimeCut Serverless v10.0 - STABLE COMPATIBLE EDITION
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
-# Cache Buster para garantir build limpo
-ENV BUILD_DATE="2025-12-12_MODERN_STACK_V1"
+# Cache Buster
+ENV BUILD_DATE="2025-12-12_STABLE_V1"
 
 # ==================== SISTEMA OPERACIONAL ====================
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
 
-# Instalação de dependências de sistema (apenas runtime, nada de compilação pesada)
+# Bibliotecas essenciais de runtime (FFmpeg, fontes, opencv libs)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsm6 \
@@ -22,21 +21,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# ==================== PYTHON DEPENDENCIES ====================
+# ==================== PYTHON & DEPENDÊNCIAS ====================
 COPY requirements.txt .
 
-# Instalação limpa e direta.
-# --no-cache-dir garante que baixamos os wheels novos
+# --no-cache-dir é vital para garantir downloads frescos
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# ==================== CORREÇÃO CRÍTICA DE PATH ====================
-# Isso adiciona as bibliotecas NVIDIA instaladas via pip (cuDNN 9, Cublas) ao PATH do sistema.
-# Sem isso, o CTranslate2 não encontra o cuDNN 9 e falha.
-ENV LD_LIBRARY_PATH="/usr/local/lib/python3.10/dist-packages/nvidia/cudnn/lib:/usr/local/lib/python3.10/dist-packages/nvidia/cublas/lib:${LD_LIBRARY_PATH}"
-
-# ==================== CÓDIGO FONTE ====================
+# ==================== CÓDIGO ====================
 COPY handler.py .
 
-# Comando de inicialização
 CMD ["python3", "-u", "handler.py"]
