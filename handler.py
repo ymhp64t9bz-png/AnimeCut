@@ -19,6 +19,13 @@ import math
 import subprocess
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
+import random
+try:
+    import cv2
+    import numpy as np
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
 
 # ==================== CONFIGURAÇÃO ====================
 logging.basicConfig(
@@ -202,6 +209,130 @@ def download_background(url: str) -> Optional[str]:
         return str(temp_file)
     except: return None
 
+# ==================== SENSOR DE ADRENALINA (ActionDetector) ====================
+class ActionDetector:
+    def __init__(self, video_path: str):
+        self.video_path = video_path
+    
+    def calculate_visual_energy(self, sample_rate=1.0) -> List[Dict]:
+        """Calcula energia visual (movimento) usando Frame Differencing"""
+        if not CV2_AVAILABLE: return []
+        
+        cap = cv2.VideoCapture(self.video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        prev_frame = None
+        energy_scores = []
+        
+        # Pula frames para performance (analisa 1 frame a cada 'sample_rate' segundos)
+        try:
+            step = int(fps * sample_rate)
+        except:
+            step = 30 # Fallback
+            
+        if step < 1: step = 1
+        
+        for i in range(0, total_frames, step):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, i)
+            ret, frame = cap.read()
+            if not ret: break
+            
+            # Converte para escala de cinza e blur para reduzir ruído
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            gray = cv2.GaussianBlur(gray, (21, 21), 0)
+            
+            if prev_frame is not None:
+                # Diferença absoluta entre frames
+                delta = cv2.absdiff(prev_frame, gray)
+                thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
+                score = np.sum(thresh) / thresh.size # % de pixels que mudaram
+                
+                timestamp = i / fps
+                energy_scores.append({"time": timestamp, "score": score})
+            
+            prev_frame = gray
+            
+        cap.release()
+        
+        # Normaliza scores (0 a 100)
+        if not energy_scores: return []
+        max_score = max(s["score"] for s in energy_scores) or 1
+        for item in energy_scores:
+            item["score"] = (item["score"] / max_score) * 100
+            
+        return energy_scores
+
+    def detect_high_energy_segments(self, threshold=70) -> List[Dict]:
+        """Retorna segmentos de alta energia (Ação/Luta)"""
+        logger.info("⚡ Iniciando Sensor de Adrenalina...")
+        visual_data = self.calculate_visual_energy()
+        
+        action_segments = []
+        current_segment = None
+        
+        for data in visual_data:
+            is_action = data["score"] > threshold
+            
+            if is_action:
+                if current_segment is None:
+                    current_segment = {"start": data["time"], "end": data["time"], "score": data["score"]}
+                else:
+                    current_segment["end"] = data["time"]
+                    current_segment["score"] = max(current_segment["score"], data["score"])
+            else:
+                if current_segment:
+                    # Só guarda se durar mais de 2 segundos
+                    if (current_segment["end"] - current_segment["start"]) > 2.0:
+                        action_segments.append(current_segment)
+                    current_segment = None
+                    
+        logger.info(f"⚡ {len(action_segments)} cenas de ação intensa detectadas!")
+        return action_segments
+
+# ==================== ANTI-SHADOWBAN 2.0 ====================
+def apply_antishadowban(clip):
+    """Aplica filtros matemáticos para tornar o vídeo único"""
+    logger.info("🛡️ Aplicando Anti-Shadowban 2.0...")
+    
+    # 1. Espelhamento Inteligente (50% de chance)
+    if random.choice([True, False]): 
+        clip = clip.fx(vfx.mirror_x)
+        logger.info("   -> Vídeo Espelhado")
+
+    # 2. Color Grading Aleatório (Sutil)
+    gamma_val = random.uniform(0.95, 1.05)
+    contrast_val = random.uniform(0.95, 1.05)
+    
+    # Nota: MoviePy v1 usa fx, v2 usa effects. Vamos usar sintaxe v1 compatível.
+    try:
+        clip = clip.fx(vfx.gamma_corr, gamma_val).fx(vfx.colorx, contrast_val)
+        logger.info(f"   -> Color Grading: Gamma={gamma_val:.2f}, Contrast={contrast_val:.2f}")
+    except:
+        logger.warning("   -> Falha ao aplicar Color Grading (MoviePy filter error)")
+
+    # 3. Micro-Zoom "Breath" (Respiração)
+    # Zoom lento de 1.0 -> 1.03 -> 1.0
+    def zoom_effect(get_frame, t):
+        img = get_frame(t)
+        h, w = img.shape[:2]
+        # Ciclo de 5 segundos
+        scale = 1 + 0.03 * (0.5 + 0.5 * math.sin(2 * math.pi * t / 5.0))
+        
+        new_w, new_h = int(w / scale), int(h / scale)
+        x1 = (w - new_w) // 2
+        y1 = (h - new_h) // 2
+        
+        cropped = img[y1:y1+new_h, x1:x1+new_w]
+        return cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
+
+    if CV2_AVAILABLE:
+        # fl_image aplica efeito frame a frame. Usamos fl para ter o tempo 't'
+        clip = clip.fl(zoom_effect)
+        logger.info("   -> Micro-Zoom Dinâmico Aplicado")
+
+    return clip
+
 # ==================== IA: ANALISE ====================
 def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
     """Analisa vídeo para encontrar cenas virais"""
@@ -230,32 +361,58 @@ def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
             beam_size=1  # Otimização de velocidade (2x mais rápido)
         )
         
-        transcript = []
-        full_text = ""
+        transcript_objs = []
         for seg in segments:
-            transcript.append({
+            transcript_objs.append({
                 "start": seg.start,
                 "end": seg.end,
-                "text": seg.text
+                "text": seg.text,
+                "type": "dialogue"
             })
-            full_text += f"[{seg.start:.1f}s - {seg.end:.1f}s] {seg.text}\n"
             
-        logger.info(f"📝 Transcrição completa ({len(transcript)} segmentos)")
+        # 3. RODAR SENSOR DE ADRENALINA ⚡
+        detector = ActionDetector(video_path)
+        action_scenes = detector.detect_high_energy_segments()
+        
+        # Injetar cenas de ação no transcript
+        for action in action_scenes:
+            transcript_objs.append({
+                "start": action["start"],
+                "end": action["end"],
+                "text": f"[⚡ CENA DE AÇÃO INTENSA / LUTA - {int(action['score'])}% ENERGIA]",
+                "type": "action"
+            })
+            
+        # Ordenar tudo por tempo
+        transcript_objs.sort(key=lambda x: x["start"])
+        
+        # Gerar texto final para o Qwen
+        full_text = ""
+        for item in transcript_objs:
+            if item.get("type") == "action":
+                full_text += f"\n[{item['start']:.1f}s - {item['end']:.1f}s] {item['text']}\n"
+            else:
+                full_text += f"[{item['start']:.1f}s - {item['end']:.1f}s] {item['text']}\n"
+            
+        logger.info(f"📝 Roteiro Híbrido Gerado: {len(transcript_objs)} eventos (Diálogos + Ação)")
         
         # 3. Análise com Qwen
         logger.info("🧠 Analisando roteiro com Qwen 2.5...")
         
         prompt = f"""
         Você é um editor de vídeo especialista em Animes e TikTok.
-        Analise o seguinte roteiro transcrito do anime '{anime_name}'.
+        O roteiro abaixo contém DIÁLOGOS e MARCAÇÕES DE AÇÃO [⚡] detectadas por sensores.
+        
+        Analise o anime '{anime_name}'.
         Identifique as 3 MELHORES cenas para clipes virais (entre 40s e 90s).
-        Procure por momentos de: Ação Intensa, Plot Twist, Comédia, Emoção Forte.
         
-        ROTEIRO:
-        {full_text[:15000]} 
+        PRIORIDADE MÁXIMA:
+        1. Cenas marcadas com [⚡ CENA DE AÇÃO INTENSA] (Lutas épicas mudo ou não).
+        2. Plot Twists e revelações.
+        3. Momentos engraçados.
         
-        IMPORTANTE: Crie um título curto, chamativo e viral para cada cena.
-        Exemplo: "O Poder Oculto!", "Revelação Chocante", "Lufy vs Kaido"
+        ROTEIRO HÍBRIDO:
+        {full_text[:25000]} 
         
         Retorne APENAS um JSON:
         [
@@ -419,9 +576,9 @@ def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> 
         with VideoFileClip(video_path) as video:
             clip = video.subclip(start, end)
             
-            # Anti-Shadowban
+            # Anti-Shadowban 2.0 (Upgrade)
             if config.get("antiShadowban"):
-                clip = clip.fx(speedx, 1.05)
+                clip = apply_antishadowban(clip)
             
             target_w, target_h = 1080, 1920
             
