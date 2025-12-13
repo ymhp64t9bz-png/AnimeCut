@@ -7,26 +7,15 @@ VOLUME: /workspace (RunPod Persistent Storage)
 CORREÇÕES: MoviePy v1.0.3 compatível, imports faltantes, fallbacks robustos
 """
 
-import runpod
+# ==================== IMPORTAÇÕES ESSENCIAIS ====================
 import os
 import sys
 import logging
-import tempfile
-import requests
-import gc
-import json
-import uuid
-import math
-import subprocess
-import shutil
-import random
-import colorama
-from pathlib import Path
-from typing import List, Dict, Optional, Tuple
 
 # ==================== CONFIGURAÇÃO DO VOLUME ====================
 # PONTO CRÍTICO: Configuração correta do volume RunPod
 VOLUME_BASE = "/workspace"  # Volume persistente do RunPod
+from pathlib import Path
 VOLUME_PATH = Path(VOLUME_BASE)
 
 # Diretórios dentro do volume
@@ -201,6 +190,19 @@ try:
     logger.info("✅ librosa disponível")
 except ImportError:
     logger.warning("⚠️ librosa não disponível")
+
+# ==================== IMPORTAÇÕES RESTANTES ====================
+import tempfile
+import requests
+import gc
+import json
+import uuid
+import math
+import subprocess
+import shutil
+import random
+import colorama
+from typing import List, Dict, Optional, Tuple
 
 # ==================== UTILITÁRIOS DE MÍDIA ====================
 
@@ -1302,8 +1304,11 @@ def handler(event):
     
     # Limpeza de memória
     gc.collect()
-    if torch and torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    try:
+        if 'torch' in sys.modules and torch and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except:
+        pass
     
     # Log de entrada
     logger.info("=" * 60)
@@ -1314,14 +1319,29 @@ def handler(event):
     
     # Modo teste
     if input_data.get("mode") == "test":
+        # Verificação segura de moviepy
+        moviepy_version = "N/A"
+        try:
+            moviepy_version = moviepy.__version__
+        except:
+            pass
+        
+        # Verificação segura de torch
+        gpu_name = None
+        try:
+            if 'torch' in sys.modules and torch and torch.cuda.is_available():
+                gpu_name = torch.cuda.get_device_name(0)
+        except:
+            pass
+        
         return {
             "status": "success",
             "system": {
                 "gpu": GPU_AVAILABLE,
-                "gpu_name": torch.cuda.get_device_name(0) if GPU_AVAILABLE else None,
+                "gpu_name": gpu_name,
                 "moviepy": MOVIEPY_AVAILABLE,
-                "moviepy_version": moviepy.__version__ if MOVIEPY_AVAILABLE else "N/A",
-                "moviepy_v1_corrected": True,  # Adicionado para confirmar correção
+                "moviepy_version": moviepy_version,
+                "moviepy_v1_corrected": True,
                 "ai": AI_AVAILABLE,
                 "whisper": WHISPER_AVAILABLE,
                 "whisper_type": WHISPER_TYPE if WHISPER_AVAILABLE else "N/A",
@@ -1421,8 +1441,11 @@ def handler(event):
                 
                 # Limpeza de memória
                 gc.collect()
-                if torch and torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                try:
+                    if 'torch' in sys.modules and torch and torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except:
+                    pass
                 
                 logger.info(f"✅ Corte {i+1} concluído")
                 
@@ -1489,17 +1512,70 @@ def handler(event):
             "traceback": traceback.format_exc() if input_data.get("debug", False) else None
         }
 
+# ==================== HANDLER SEGURO ====================
+
+def safe_handler(event):
+    """Wrapper seguro para o handler"""
+    try:
+        return handler(event)
+    except Exception as e:
+        logger.error(f"❌ ERRO GLOBAL NO HANDLER: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {"status": "error", "error": str(e)}
+
 # ==================== INICIALIZAÇÃO ====================
 
 if __name__ == "__main__":
-    print("\n" + "="*60)
-    print("🎬 ANIMECUT ULTIMATE HYBRID v12.0 - CORRIGIDO")
-    print(f"📁 Volume: {VOLUME_BASE}")
-    print(f"🎞️ MoviePy: v{moviepy.__version__ if 'moviepy' in sys.modules else 'N/A'} (CORRIGIDO v1)")
-    print(f"⚡ PyTorch CUDA: {torch.cuda.is_available() if 'torch' in sys.modules else 'N/A'}")
-    print("="*60 + "\n")
-    
-    sys.stdout.flush()
-    
-    # Inicia servidor RunPod
-    runpod.serverless.start({"handler": handler})
+    try:
+        # LOG SIMPLES E SEGURO
+        print("\n" + "="*60)
+        print("🎬 ANIMECUT ULTIMATE HYBRID v12.0 - CORRIGIDO")
+        print(f"📁 Volume: {VOLUME_BASE}")
+        
+        # VERIFICAÇÃO SEGURA DE MOVIEPY
+        try:
+            moviepy_version = moviepy.__version__
+            print(f"🎞️ MoviePy: v{moviepy_version}")
+        except:
+            print("🎞️ MoviePy: N/A")
+        
+        # VERIFICAÇÃO SEGURA DE PYTORCH
+        try:
+            import torch
+            print(f"🔥 PyTorch: v{torch.__version__}")
+            print(f"⚡ CUDA: {'✅' if torch.cuda.is_available() else '❌'}")
+        except ImportError:
+            print("❌ PyTorch: NÃO INSTALADO")
+        except Exception as e:
+            print(f"⚠️ PyTorch: Erro - {str(e)[:50]}...")
+        
+        print("="*60 + "\n")
+        
+        # Forçar flush
+        sys.stdout.flush()
+        sys.stderr.flush()
+        
+        # Importa runpod aqui para evitar problemas
+        try:
+            import runpod
+            print("✅ RunPod importado com sucesso")
+        except ImportError as e:
+            print(f"❌ RunPod não disponível: {e}")
+            sys.exit(1)
+        
+        # INICIA SERVIDOR COM TRY-EXCEPT
+        print("🌐 Iniciando servidor RunPod...")
+        sys.stdout.flush()
+        
+        # Usa o handler seguro
+        runpod.serverless.start({"handler": safe_handler})
+        
+    except KeyboardInterrupt:
+        print("\n👋 Servidor interrompido")
+        sys.exit(0)
+    except Exception as e:
+        print(f"💥 ERRO CRÍTICO NA INICIALIZAÇÃO: {e}")
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
