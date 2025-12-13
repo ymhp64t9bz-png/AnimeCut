@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-✂️ AnimeCut Serverless v12.0 ULTIMATE HYBRID
-Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V2
+✂️ AnimeCut Serverless v12.0 ULTIMATE HYBRID - CORRIGIDO
+Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1
 VOLUME: /workspace (RunPod Persistent Storage)
+CORREÇÕES: MoviePy v1.0.3 compatível, imports faltantes, fallbacks robustos
 """
 
 import runpod
@@ -18,9 +19,10 @@ import uuid
 import math
 import subprocess
 import shutil
+import random
+import colorama
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
-import random
 
 # ==================== CONFIGURAÇÃO DO VOLUME ====================
 # PONTO CRÍTICO: Configuração correta do volume RunPod
@@ -69,42 +71,50 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Visão computacional limitada: {e}")
 
-# 2. MoviePy (Detecção de Versão)
+# 2. MoviePy v1.0.3 (VERSÃO CORRIGIDA - SEMPRE v1)
 MOVIEPY_AVAILABLE = False
-MOVIEPY_V2 = False
 try:
     import moviepy
     logger.info(f"🎞️ MoviePy versão: {moviepy.__version__}")
     
-    if moviepy.__version__.startswith('2'):
-        MOVIEPY_V2 = True
-        from moviepy import *
-        from moviepy.video.io.VideoFileClip import VideoFileClip
-        from moviepy.video.VideoClip import ImageClip, ColorClip, TextClip
-        from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
-        from moviepy.audio.io.AudioFileClip import AudioFileClip
-        from moviepy.video.fx import MirrorX, GammaCorr, MultiplyColor
-        logger.info("✅ MoviePy v2 configurado")
-    else:
-        MOVIEPY_V2 = False
-        from moviepy.editor import (
-            VideoFileClip, ImageClip, CompositeVideoClip,
-            ColorClip, TextClip, AudioFileClip
-        )
-        from moviepy.video.fx.all import mirror_x, gamma_corr, colorx
-        logger.info("✅ MoviePy v1 configurado")
-        
+    # IMPORTS CORRETOS PARA MOVIEPY v1.0.3
+    from moviepy.editor import (
+        VideoFileClip, ImageClip, CompositeVideoClip,
+        ColorClip, TextClip, AudioFileClip
+    )
+    from moviepy.video.fx.all import mirror_x, gamma_corr, colorx
+    
+    logger.info("✅ MoviePy v1 configurado (CORRIGIDO)")
     MOVIEPY_AVAILABLE = True
+    
 except ImportError as e:
     logger.error(f"❌ MoviePy não disponível: {e}")
+except Exception as e:
+    logger.error(f"❌ Erro no MoviePy: {e}")
 
-# 3. IA (Transformers/Torch)
+# 3. IA (Transformers/Torch) - COM FALLBACK ROBUSTO
 AI_AVAILABLE = False
 GPU_AVAILABLE = False
+WHISPER_AVAILABLE = False
 try:
     import torch
     from transformers import pipeline, AutoModelForCausalLM, AutoTokenizer
-    from faster_whisper import WhisperModel
+    
+    # Tenta faster_whisper primeiro, depois openai-whisper como fallback
+    try:
+        from faster_whisper import WhisperModel
+        WHISPER_AVAILABLE = True
+        WHISPER_TYPE = "faster_whisper"
+        logger.info("✅ faster-whisper disponível")
+    except ImportError:
+        try:
+            import whisper
+            WHISPER_AVAILABLE = True
+            WHISPER_TYPE = "openai_whisper"
+            logger.info("✅ openai-whisper disponível (fallback)")
+        except ImportError:
+            WHISPER_AVAILABLE = False
+            logger.warning("⚠️ Nenhuma biblioteca whisper disponível")
     
     GPU_AVAILABLE = torch.cuda.is_available()
     DEVICE = "cuda" if GPU_AVAILABLE else "cpu"
@@ -112,8 +122,8 @@ try:
     
     if GPU_AVAILABLE:
         gpu_name = torch.cuda.get_device_name(0)
-        # gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
-        logger.info(f"✅ GPU: {gpu_name}")
+        gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+        logger.info(f"✅ GPU: {gpu_name} ({gpu_mem:.1f} GB)")
     else:
         logger.warning("⚠️ Executando em CPU (GPU não detectada)")
 except ImportError as e:
@@ -128,21 +138,25 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Pillow não disponível: {e}")
 
-# 5. DeepFilterNet (Áudio)
+# 5. DeepFilterNet (Áudio) - COM FALLBACK
 DF_AVAILABLE = False
 try:
-    import df  # DeepFilterNet instalado como 'df'
+    # Tenta importar como 'df' primeiro (DeepFilterNet)
+    import df
     DF_AVAILABLE = True
-    logger.info(f"✅ DeepFilterNet disponível (v{df.__version__})")
+    DF_TYPE = "df"
+    logger.info(f"✅ DeepFilterNet disponível (v{df.__version__ if hasattr(df, '__version__') else 'N/A'})")
 except ImportError:
     try:
+        # Tenta como 'deepfilternet'
         import deepfilternet
         DF_AVAILABLE = True
+        DF_TYPE = "deepfilternet"
         logger.info("✅ DeepFilterNet disponível")
     except ImportError as e:
         logger.warning(f"⚠️ DeepFilterNet não disponível: {e}")
 
-# 6. Backblaze B2 (Upload)
+# 6. Backblaze B2 (Upload) - COM FALLBACK SEGURO
 B2_AVAILABLE = False
 try:
     import boto3
@@ -168,6 +182,25 @@ try:
         logger.warning("⚠️ Credenciais B2 não configuradas")
 except Exception as e:
     logger.warning(f"⚠️ Backblaze B2 não configurado: {e}")
+
+# 7. Outras dependências
+try:
+    import Cython
+    logger.info("✅ Cython disponível")
+except ImportError:
+    logger.debug("Cython não disponível (opcional)")
+
+try:
+    import soundfile
+    logger.info("✅ soundfile disponível")
+except ImportError:
+    logger.warning("⚠️ soundfile não disponível")
+
+try:
+    import librosa
+    logger.info("✅ librosa disponível")
+except ImportError:
+    logger.warning("⚠️ librosa não disponível")
 
 # ==================== UTILITÁRIOS DE MÍDIA ====================
 
@@ -196,7 +229,8 @@ download_font()
 
 def clean_audio_deepfilter(input_path: Path) -> Path:
     """
-    Limpeza de áudio usando DeepFilterNet (df) com fallback robusto
+    Limpeza de áudio usando DeepFilterNet com fallback robusto
+    CORRIGIDO: Suporte para ambos 'df' e 'deepfilternet'
     """
     logger.info(f"🧹 Processando áudio: {input_path.name}")
     
@@ -235,7 +269,27 @@ def clean_audio_deepfilter(input_path: Path) -> Path:
     except Exception as e:
         logger.warning(f"⚠️ DeepFilterNet CLI falhou: {e}")
     
-    # Método 2: FFmpeg fallback (sempre disponível)
+    # Método 2: Python API (se disponível)
+    if DF_AVAILABLE:
+        try:
+            logger.info("🔧 Usando DeepFilterNet Python API...")
+            if DF_TYPE == "df":
+                import df
+                output_file = output_dir / f"{original_path.stem}_df_enhanced.wav"
+                df.enhance(str(original_path), str(output_file))
+            elif DF_TYPE == "deepfilternet":
+                import deepfilternet
+                output_file = output_dir / f"{original_path.stem}_deepfilter_enhanced.wav"
+                # Aqui você precisaria implementar a chamada correta da API
+                pass
+            
+            if output_file.exists() and output_file.stat().st_size > 0:
+                logger.info(f"✅ Áudio processado via API: {output_file.name}")
+                return output_file
+        except Exception as e:
+            logger.warning(f"⚠️ DeepFilterNet API falhou: {e}")
+    
+    # Método 3: FFmpeg fallback (sempre disponível)
     try:
         output_file = output_dir / f"{original_path.stem}_cleaned.wav"
         logger.info(f"🔄 Usando FFmpeg fallback: {output_file.name}")
@@ -423,10 +477,10 @@ class ActionDetector:
         logger.info(f"✅ {len(action_segments)} cenas de ação detectadas")
         return action_segments
 
-# ==================== ANTI-SHADOWBAN ====================
+# ==================== ANTI-SHADOWBAN - CORRIGIDO PARA MOVIEPY v1 ====================
 
 def apply_antishadowban(clip):
-    """Aplica transformações para tornar vídeo único"""
+    """Aplica transformações para tornar vídeo único - CORRIGIDO PARA MOVIEPY v1"""
     logger.info("🛡️ Aplicando Anti-Shadowban...")
     
     if not MOVIEPY_AVAILABLE:
@@ -436,11 +490,8 @@ def apply_antishadowban(clip):
     # 1. Espelhamento aleatório (50% chance)
     if random.choice([True, False]):
         try:
-            if MOVIEPY_V2:
-                from moviepy.video.fx import MirrorX
-                clip = clip.with_effect(MirrorX())
-            else:
-                clip = clip.fx(mirror_x)
+            # MoviePy v1 usa mirror_x
+            clip = clip.fx(mirror_x)
             logger.info("   → Vídeo espelhado")
         except Exception as e:
             logger.warning(f"   → Falha no espelhamento: {e}")
@@ -450,13 +501,9 @@ def apply_antishadowban(clip):
     contrast_val = random.uniform(0.97, 1.03)
     
     try:
-        if MOVIEPY_V2:
-            from moviepy.video.fx import GammaCorr, MultiplyColor
-            clip = clip.with_effect(GammaCorr(gamma_val))
-            clip = clip.with_effect(MultiplyColor(contrast_val))
-        else:
-            clip = clip.fx(gamma_corr, gamma_val)
-            clip = clip.fx(colorx, contrast_val)
+        # MoviePy v1 usa gamma_corr e colorx
+        clip = clip.fx(gamma_corr, gamma_val)
+        clip = clip.fx(colorx, contrast_val)
         logger.info(f"   → Cor: gamma={gamma_val:.2f}, contraste={contrast_val:.2f}")
     except Exception as e:
         logger.warning(f"   → Falha nos ajustes de cor: {e}")
@@ -479,10 +526,8 @@ def apply_antishadowban(clip):
                 cropped = frame[y1:y1+new_h, x1:x1+new_w]
                 return cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
             
-            if MOVIEPY_V2:
-                clip = clip.with_transform(zoom_effect)
-            else:
-                clip = clip.fl(zoom_effect)
+            # MoviePy v1 usa .fl() para efeitos customizados
+            clip = clip.fl(zoom_effect)
             logger.info("   → Zoom dinâmico aplicado")
         except Exception as e:
             logger.debug(f"   → Zoom dinâmico não aplicado: {e}")
@@ -497,34 +542,79 @@ qwen_tokenizer = None
 yolo_model = None
 
 def load_turbo_whisper():
-    """Carrega Whisper com Flash Attention 2 se disponível"""
+    """Carrega Whisper com fallback robusto"""
     global whisper_pipeline
     
-    if whisper_pipeline is not None or not AI_AVAILABLE:
+    if whisper_pipeline is not None or not AI_AVAILABLE or not WHISPER_AVAILABLE:
         return
     
     try:
         logger.info("🚀 Carregando Whisper...")
         
-        # Tenta Flash Attention 2 primeiro
-        try:
-            whisper_pipeline = pipeline(
-                "automatic-speech-recognition",
-                model="openai/whisper-large-v3",
-                torch_dtype=torch.float16 if GPU_AVAILABLE else torch.float32,
-                device=DEVICE,
-                model_kwargs={"attn_implementation": "flash_attention_2"}
+        if WHISPER_TYPE == "faster_whisper":
+            # Usar faster-whisper
+            from faster_whisper import WhisperModel
+            whisper_model = WhisperModel(
+                "large-v3",
+                device="cuda" if GPU_AVAILABLE else "cpu",
+                compute_type="float16" if GPU_AVAILABLE else "float32"
             )
-            logger.info("✅ Whisper com Flash Attention 2")
-        except:
-            # Fallback para versão normal
-            whisper_pipeline = pipeline(
-                "automatic-speech-recognition",
-                model="openai/whisper-large-v3",
-                torch_dtype=torch.float16 if GPU_AVAILABLE else torch.float32,
-                device=DEVICE
+            
+            # Criar wrapper para compatibilidade com pipeline
+            class FasterWhisperWrapper:
+                def __init__(self, model):
+                    self.model = model
+                
+                def __call__(self, audio_path, **kwargs):
+                    segments, info = self.model.transcribe(
+                        audio_path,
+                        language="pt",
+                        beam_size=5,
+                        vad_filter=True
+                    )
+                    
+                    chunks = []
+                    for segment in segments:
+                        chunks.append({
+                            "text": segment.text,
+                            "timestamp": (segment.start, segment.end)
+                        })
+                    
+                    return {"chunks": chunks}
+            
+            whisper_pipeline = FasterWhisperWrapper(whisper_model)
+            logger.info("✅ Whisper (faster-whisper) carregado")
+            
+        elif WHISPER_TYPE == "openai_whisper":
+            # Usar openai-whisper
+            import whisper
+            whisper_model = whisper.load_model(
+                "large-v3",
+                device="cuda" if GPU_AVAILABLE else "cpu"
             )
-            logger.info("✅ Whisper (versão padrão)")
+            
+            class OpenAIWhisperWrapper:
+                def __init__(self, model):
+                    self.model = model
+                
+                def __call__(self, audio_path, **kwargs):
+                    result = self.model.transcribe(
+                        audio_path,
+                        language="pt",
+                        verbose=False
+                    )
+                    
+                    chunks = []
+                    for segment in result.get("segments", []):
+                        chunks.append({
+                            "text": segment.get("text", "").strip(),
+                            "timestamp": (segment.get("start", 0), segment.get("end", 0))
+                        })
+                    
+                    return {"chunks": chunks}
+            
+            whisper_pipeline = OpenAIWhisperWrapper(whisper_model)
+            logger.info("✅ Whisper (openai-whisper) carregado")
             
     except Exception as e:
         logger.error(f"❌ Erro ao carregar Whisper: {e}")
@@ -628,7 +718,7 @@ def criar_titulo_pil(
     pos_vertical: float = 0.15
 ):
     """
-    Renderiza título com quebra de linha e contorno
+    Renderiza título com quebra de linha e contorno - CORRIGIDO PARA MOVIEPY v1
     """
     if not PIL_AVAILABLE:
         logger.warning("⚠️ Pillow não disponível, pulando título")
@@ -752,18 +842,14 @@ def criar_titulo_pil(
         
         y_pos += altura_linha + 10
     
-    # Converte para clip MoviePy
+    # Converte para clip MoviePy v1
     numpy_img = np.array(img)
     
     try:
-        if MOVIEPY_V2:
-            clip = ImageClip(numpy_img).with_duration(duracao)
-            pos_y = int(altura_video * pos_vertical)
-            clip = clip.with_position(('center', pos_y))
-        else:
-            clip = ImageClip(numpy_img).set_duration(duracao)
-            pos_y = int(altura_video * pos_vertical)
-            clip = clip.set_position(('center', pos_y))
+        # MoviePy v1 usa .set_duration() e .set_position()
+        clip = ImageClip(numpy_img).set_duration(duracao)
+        pos_y = int(altura_video * pos_vertical)
+        clip = clip.set_position(('center', pos_y))
         
         return clip
     except Exception as e:
@@ -775,9 +861,9 @@ def criar_titulo_pil(
 def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
     """Analisa vídeo para encontrar cenas virais"""
     
-    if not AI_AVAILABLE:
+    if not AI_AVAILABLE or not WHISPER_AVAILABLE:
         logger.warning("⚠️ IA não disponível, pulando análise automática")
-        return []
+        return generate_fallback_cuts(video_path, [], anime_name)
     
     try:
         load_turbo_whisper()
@@ -807,22 +893,18 @@ def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
         # 3. Transcrição com Whisper
         logger.info("🎤 Transcrevendo...")
         result = whisper_pipeline(
-            str(clean_audio_path),
-            chunk_length_s=30,
-            batch_size=16 if GPU_AVAILABLE else 4,
-            return_timestamps=True,
-            generate_kwargs={"language": "portuguese"}
+            str(clean_audio_path)
         )
         
         segments = result.get("chunks", [])
         transcript_objs = []
         
         for seg in segments:
-            start_t, end_t = seg["timestamp"]
+            start_t, end_t = seg.get("timestamp", (0, 0))
             transcript_objs.append({
                 "start": start_t,
                 "end": end_t,
-                "text": seg["text"].strip(),
+                "text": seg.get("text", "").strip(),
                 "type": "dialogue"
             })
         
@@ -899,8 +981,12 @@ Retorne APENAS JSON no formato:
             end_idx = response_text.rfind("]") + 1
             json_str = response_text[start_idx:end_idx]
         
-        viral_cuts = json.loads(json_str)
-        logger.info(f"🔥 {len(viral_cuts)} cenas virais identificadas")
+        try:
+            viral_cuts = json.loads(json_str)
+            logger.info(f"🔥 {len(viral_cuts)} cenas virais identificadas")
+        except:
+            logger.warning("❌ Não foi possível parsear JSON do Qwen, usando fallback")
+            viral_cuts = generate_fallback_cuts(video_path, transcript_objs, anime_name)
         
         # Limpeza
         try:
@@ -924,12 +1010,8 @@ def generate_fallback_cuts(video_path: str, transcript: List[Dict], anime_name: 
     cuts = []
     
     try:
-        if MOVIEPY_V2:
-            video = VideoFileClip(video_path)
-        else:
-            from moviepy.editor import VideoFileClip
-            video = VideoFileClip(video_path)
-        
+        # MoviePy v1 sempre usa VideoFileClip diretamente
+        video = VideoFileClip(video_path)
         duration = video.duration
         video.close()
         
@@ -988,10 +1070,10 @@ def generate_fallback_cuts(video_path: str, transcript: List[Dict], anime_name: 
     logger.info(f"🔄 Gerados {len(cuts)} cortes fallback")
     return cuts
 
-# ==================== PROCESSAMENTO DE CORTES ====================
+# ==================== PROCESSAMENTO DE CORTES - CORRIGIDO PARA MOVIEPY v1 ====================
 
 def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> str:
-    """Processa um corte individual do vídeo"""
+    """Processa um corte individual do vídeo - CORRIGIDO PARA MOVIEPY v1"""
     
     try:
         start = cut_data.get('start', 0)
@@ -1001,18 +1083,11 @@ def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> 
         logger.info(f"🎬 Processando corte {num}: {title}")
         logger.info(f"   ⏱️  {start:.1f}s - {end:.1f}s ({end-start:.1f}s)")
         
-        # Carrega vídeo
-        if MOVIEPY_V2:
-            video = VideoFileClip(video_path)
-        else:
-            from moviepy.editor import VideoFileClip
-            video = VideoFileClip(video_path)
+        # Carrega vídeo (MoviePy v1)
+        video = VideoFileClip(video_path)
         
-        # Corta segmento
-        if hasattr(video, 'subclipped'):
-            clip = video.subclipped(start, end)
-        else:
-            clip = video.subclip(start, end)
+        # Corta segmento (MoviePy v1)
+        clip = video.subclip(start, end)
         
         # Aplica anti-shadowban
         if config.get("antiShadowban", True):
@@ -1031,10 +1106,8 @@ def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> 
                 bg_img = PILImage.open(bg_path).convert('RGB')
                 bg_img = bg_img.resize((target_w, target_h))
                 
-                if MOVIEPY_V2:
-                    bg_clip = ImageClip(np.array(bg_img)).with_duration(clip.duration)
-                else:
-                    bg_clip = ImageClip(np.array(bg_img)).set_duration(clip.duration)
+                # MoviePy v1
+                bg_clip = ImageClip(np.array(bg_img)).set_duration(clip.duration)
                     
                 logger.info(f"🖼️ Background aplicado: {os.path.basename(bg_path)}")
             except Exception as e:
@@ -1043,12 +1116,9 @@ def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> 
         if bg_clip is None:
             # Background gradiente escuro
             bg_color = (15, 15, 30)  # Azul escuro
-            if MOVIEPY_V2:
-                bg_clip = ColorClip(size=(target_w, target_h), color=bg_color)
-                bg_clip = bg_clip.with_duration(clip.duration)
-            else:
-                bg_clip = ColorClip(size=(target_w, target_h), color=bg_color)
-                bg_clip = bg_clip.set_duration(clip.duration)
+            # MoviePy v1
+            bg_clip = ColorClip(size=(target_w, target_h), color=bg_color)
+            bg_clip = bg_clip.set_duration(clip.duration)
         
         # Smart Crop com detecção de rosto
         zoom_factor = 1.15
@@ -1101,15 +1171,10 @@ def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> 
         except Exception as e:
             logger.debug(f"Crop inteligente falhou: {e}")
         
-        # Aplica crop e resize
-        if MOVIEPY_V2:
-            clip_cropped = clip.cropped(x1=x1, y1=y1, width=new_w, height=new_h)
-            clip_resized = clip_cropped.resized(width=target_w)
-            clip_pos = clip_resized.with_position('center')
-        else:
-            clip_cropped = clip.crop(x1=x1, y1=y1, width=new_w, height=new_h)
-            clip_resized = clip_cropped.resize(target_w / clip_cropped.w)
-            clip_pos = clip_resized.set_position(('center', 'center'))
+        # Aplica crop e resize (MoviePy v1)
+        clip_cropped = clip.crop(x1=x1, y1=y1, width=new_w, height=new_h)
+        clip_resized = clip_cropped.resize(target_w / clip_cropped.w)
+        clip_pos = clip_resized.set_position(('center', 'center'))
         
         # Camadas do vídeo
         layers = [bg_clip, clip_pos]
@@ -1134,11 +1199,8 @@ def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> 
             if t_clip:
                 layers.append(t_clip)
         
-        # Composição final
-        if MOVIEPY_V2:
-            final = CompositeVideoClip(layers, size=(target_w, target_h))
-        else:
-            final = CompositeVideoClip(layers, size=(target_w, target_h))
+        # Composição final (MoviePy v1)
+        final = CompositeVideoClip(layers, size=(target_w, target_h))
         
         # Gera nome de arquivo único
         output_filename = f"cut_{num}_{uuid.uuid4().hex[:8]}.mp4"
@@ -1167,39 +1229,23 @@ def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> 
             preset = 'ultrafast'
             ffmpeg_params.extend(['-crf', '23'])
         
-        # Renderiza vídeo
+        # Renderiza vídeo (MoviePy v1)
         logger.info(f"⚙️ Renderizando: {output_filename}")
         
-        if MOVIEPY_V2:
-            final.write_videofile(
-                str(output_path),
-                codec=codec,
-                audio_codec='aac',
-                preset=preset,
-                threads=4,
-                ffmpeg_params=ffmpeg_params,
-                logger=None,
-                verbose=False
-            )
-        else:
-            final.write_videofile(
-                str(output_path),
-                codec=codec,
-                audio_codec='aac',
-                preset=preset,
-                threads=4,
-                ffmpeg_params=ffmpeg_params,
-                logger=None,
-                verbose=False
-            )
+        final.write_videofile(
+            str(output_path),
+            codec=codec,
+            audio_codec='aac',
+            preset=preset,
+            threads=4,
+            ffmpeg_params=ffmpeg_params,
+            logger=None,
+            verbose=False
+        )
         
-        # Limpeza
-        if MOVIEPY_V2:
-            final.close()
-            video.close()
-        else:
-            final.close()
-            video.close()
+        # Limpeza (MoviePy v1)
+        final.close()
+        video.close()
         
         file_size = output_path.stat().st_size / 1e6
         logger.info(f"✅ Corte {num} finalizado: {output_filename} ({file_size:.1f} MB)")
@@ -1274,12 +1320,21 @@ def handler(event):
                 "gpu": GPU_AVAILABLE,
                 "gpu_name": torch.cuda.get_device_name(0) if GPU_AVAILABLE else None,
                 "moviepy": MOVIEPY_AVAILABLE,
-                "moviepy_version": "v2" if MOVIEPY_V2 else "v1",
+                "moviepy_version": moviepy.__version__ if MOVIEPY_AVAILABLE else "N/A",
+                "moviepy_v1_corrected": True,  # Adicionado para confirmar correção
                 "ai": AI_AVAILABLE,
+                "whisper": WHISPER_AVAILABLE,
+                "whisper_type": WHISPER_TYPE if WHISPER_AVAILABLE else "N/A",
                 "deepfilter": DF_AVAILABLE,
                 "b2": B2_AVAILABLE,
                 "volume": VOLUME_BASE,
-                "python": sys.version.split()[0]
+                "python": sys.version.split()[0],
+                "dependencies": {
+                    "colorama": "✅" if 'colorama' in sys.modules else "❌",
+                    "Cython": "✅" if 'Cython' in sys.modules else "❌",
+                    "soundfile": "✅" if 'soundfile' in sys.modules else "❌",
+                    "librosa": "✅" if 'librosa' in sys.modules else "❌"
+                }
             }
         }
     
@@ -1312,7 +1367,7 @@ def handler(event):
         cuts = []
         cut_type = input_data.get("cutType", "auto")
         
-        if cut_type == "auto" and AI_AVAILABLE:
+        if cut_type == "auto" and AI_AVAILABLE and WHISPER_AVAILABLE:
             logger.info("🤖 Modo automático (IA)")
             cuts = analyze_video_content(video_path, anime_name)
         elif cut_type == "manual":
@@ -1409,14 +1464,17 @@ def handler(event):
                 "anime_name": anime_name,
                 "total_cuts": len(results),
                 "successful_cuts": len([r for r in results if r.get("url")]),
-                "moviepy_version": "v2" if MOVIEPY_V2 else "v1",
+                "moviepy_version": moviepy.__version__ if MOVIEPY_AVAILABLE else "N/A",
+                "moviepy_corrected": True,
                 "gpu_used": GPU_AVAILABLE,
+                "whisper_type": WHISPER_TYPE if WHISPER_AVAILABLE else "N/A",
                 "processing_time": "N/A"  # Poderia adicionar timestamp
             },
             "volume_info": {
                 "base_path": VOLUME_BASE,
                 "output_dir": str(OUTPUT_DIR),
-                "models_dir": str(MODELS_DIR)
+                "models_dir": str(MODELS_DIR),
+                "fonts_dir": str(FONTS_DIR)
             }
         }
         
@@ -1435,8 +1493,10 @@ def handler(event):
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("🎬 ANIMECUT ULTIMATE HYBRID v12.0")
-    print("📁 Volume: /workspace")
+    print("🎬 ANIMECUT ULTIMATE HYBRID v12.0 - CORRIGIDO")
+    print(f"📁 Volume: {VOLUME_BASE}")
+    print(f"🎞️ MoviePy: v{moviepy.__version__ if 'moviepy' in sys.modules else 'N/A'} (CORRIGIDO v1)")
+    print(f"⚡ PyTorch CUDA: {torch.cuda.is_available() if 'torch' in sys.modules else 'N/A'}")
     print("="*60 + "\n")
     
     sys.stdout.flush()

@@ -4,7 +4,7 @@ FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 WORKDIR /app
 
 # Mude isso para forçar o RunPod a ler o novo arquivo (Cache Bust manual)
-ENV BUILD_DATE="V12_HYBRID_IA_FIX" 
+ENV BUILD_DATE="V12_HYBRID_MOVIEPY_V1_FIX" 
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
@@ -40,7 +40,7 @@ RUN pip install --no-cache-dir \
     requests \
     tqdm \
     colorama \
-    "moviepy>=2.0.0.dev2" \
+    "moviepy==1.0.3" \
     imageio-ffmpeg>=0.5.1 \
     "opencv-python-headless<=4.9.0.80" \
     Pillow \

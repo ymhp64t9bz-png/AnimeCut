@@ -13,7 +13,7 @@ numpy==1.26.4
 
 # ==================== PROCESSAMENTO DE VÍDEO ====================
 # MoviePy v2 (Dev) para melhor performance e menos bugs com numpy novo
-moviepy>=2.0.0.dev2
+moviepy==1.0.3
 imageio>=2.34.1
 imageio-ffmpeg>=0.5.1
 # OpenCV Headless para ambiente servidor
@@ -39,7 +39,7 @@ boto3>=1.34.0
 botocore>=1.34.0
 Pillow>=10.3.0
 soundfile>=0.12.1
-decorator>=4.4.2
+decorator<5.0
 librosa
 
 # Utilitários de compilação
