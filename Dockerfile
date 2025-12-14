@@ -4,7 +4,7 @@ FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 WORKDIR /app
 
 # Mude isso para forçar o RunPod a ler o novo arquivo (Cache Bust manual)
-ENV BUILD_DATE="V12.1_GPU_FORCED_OPTIMIZED" 
+ENV BUILD_DATE="V12.2_TORCHVISION_FIX" 
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
@@ -49,10 +49,8 @@ RUN pip install --no-cache-dir \
     soundfile \
     ultralytics \
     proglog>=0.1.10 \
-    deepfilternet
-
-# ==================== 5. WHISPER & IA (GPU FOCUSED) ====================
-RUN pip install --no-cache-dir \
+    # ==================== 5. WHISPER & IA (GPU FOCUSED) ====================
+    RUN pip install --no-cache-dir \
     transformers \
     optimum \
     accelerate \
@@ -61,6 +59,10 @@ RUN pip install --no-cache-dir \
     insanely-fast-whisper \
     protobuf \
     sentencepiece
+
+# ==================== 6. CORREÇÃO DE COMPATIBILIDADE (CRÍTICO) ====================
+# Garante que torchvision e torchaudio estejam alinhados com o Torch 2.2.1 da imagem base
+RUN pip install --no-cache-dir "torchvision==0.17.1" "torchaudio==2.2.1" --index-url https://download.pytorch.org/whl/cu121 --force-reinstall
 
 # ==================== 7. BLINDAGEM FINAL NUMPY ====================
 # Reinstalamos numpy 1.26.4 forçadamente no final para garantir integridade
