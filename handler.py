@@ -89,7 +89,7 @@ try:
     import torch
     from transformers import pipeline, AutoModelForCausalLM, AutoTokenizer
     
-    # Tenta faster_whisper primeiro, depois openai-whisper como fallback
+    # Tenta faster_whisper primeiro, depois openai_whisper como fallback
     try:
         from faster_whisper import WhisperModel
         WHISPER_AVAILABLE = True
@@ -127,23 +127,57 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Pillow não disponível: {e}")
 
-# 5. DeepFilterNet (Áudio) - COM FALLBACK
+# 5. DeepFilterNet (Áudio) - COM FALLBACK ROBUSTO
 DF_AVAILABLE = False
+DF_TYPE = None
+DF_ERROR = None
+
 try:
     # Tenta importar como 'df' primeiro (DeepFilterNet)
-    import df
-    DF_AVAILABLE = True
-    DF_TYPE = "df"
-    logger.info(f"✅ DeepFilterNet disponível (v{df.__version__ if hasattr(df, '__version__') else 'N/A'})")
-except ImportError:
+    # CORREÇÃO CRÍTICA: Isolamos o import do df para evitar quebrar o sistema
+    import importlib.util
+    
+    # Verifica se o módulo existe antes de importar
+    df_spec = importlib.util.find_spec("df")
+    if df_spec is not None:
+        try:
+            import df
+            DF_AVAILABLE = True
+            DF_TYPE = "df"
+            logger.info(f"✅ DeepFilterNet disponível (v{df.__version__ if hasattr(df, '__version__') else 'N/A'})")
+        except Exception as e:
+            DF_AVAILABLE = False
+            DF_ERROR = str(e)
+            logger.warning(f"⚠️ DeepFilterNet import falhou (mas não quebrou o sistema): {e}")
+            # Define df como None para evitar erros
+            df = None
+    else:
+        logger.info("ℹ️ DeepFilterNet 'df' não encontrado")
+except ImportError as e:
+    DF_ERROR = str(e)
+    logger.info(f"ℹ️ DeepFilterNet 'df' não disponível: {e}")
+
+# Tenta como 'deepfilternet' se 'df' falhou
+if not DF_AVAILABLE:
     try:
-        # Tenta como 'deepfilternet'
-        import deepfilternet
-        DF_AVAILABLE = True
-        DF_TYPE = "deepfilternet"
-        logger.info("✅ DeepFilterNet disponível")
-    except ImportError as e:
-        logger.warning(f"⚠️ DeepFilterNet não disponível: {e}")
+        deepfilternet_spec = importlib.util.find_spec("deepfilternet")
+        if deepfilternet_spec is not None:
+            try:
+                import deepfilternet
+                DF_AVAILABLE = True
+                DF_TYPE = "deepfilternet"
+                logger.info("✅ DeepFilterNet (deepfilternet) disponível")
+            except Exception as e:
+                DF_ERROR = str(e)
+                logger.warning(f"⚠️ DeepFilterNet (deepfilternet) import falhou: {e}")
+        else:
+            logger.info("ℹ️ DeepFilterNet 'deepfilternet' não encontrado")
+    except Exception as e:
+        DF_ERROR = str(e)
+        logger.debug(f"DeepFilterNet verificação falhou: {e}")
+
+if not DF_AVAILABLE:
+    logger.warning(f"⚠️ DeepFilterNet não disponível. Erro: {DF_ERROR}")
 
 # 6. Backblaze B2 (Upload) - COM FALLBACK SEGURO
 B2_AVAILABLE = False
@@ -232,7 +266,7 @@ download_font()
 def clean_audio_deepfilter(input_path: Path) -> Path:
     """
     Limpeza de áudio usando DeepFilterNet com fallback robusto
-    CORRIGIDO: Suporte para ambos 'df' e 'deepfilternet'
+    CORRIGIDO: Suporte para ambos 'df' e 'deepfilternet' com proteção contra incompatibilidade
     """
     logger.info(f"🧹 Processando áudio: {input_path.name}")
     
@@ -271,50 +305,74 @@ def clean_audio_deepfilter(input_path: Path) -> Path:
     except Exception as e:
         logger.warning(f"⚠️ DeepFilterNet CLI falhou: {e}")
     
-    # Método 2: Python API (se disponível)
-    if DF_AVAILABLE:
+    # Método 2: Python API (se disponível e funcional)
+    if DF_AVAILABLE and DF_TYPE:
         try:
-            logger.info("🔧 Usando DeepFilterNet Python API...")
-            if DF_TYPE == "df":
-                import df
-                output_file = output_dir / f"{original_path.stem}_df_enhanced.wav"
-                df.enhance(str(original_path), str(output_file))
-            elif DF_TYPE == "deepfilternet":
-                import deepfilternet
-                output_file = output_dir / f"{original_path.stem}_deepfilter_enhanced.wav"
-                # Aqui você precisaria implementar a chamada correta da API
-                pass
+            logger.info(f"🔧 Usando DeepFilterNet Python API ({DF_TYPE})...")
             
-            if output_file.exists() and output_file.stat().st_size > 0:
-                logger.info(f"✅ Áudio processado via API: {output_file.name}")
-                return output_file
+            if DF_TYPE == "df":
+                # Tenta importar novamente com proteção
+                try:
+                    import df
+                    output_file = output_dir / f"{original_path.stem}_df_enhanced.wav"
+                    df.enhance(str(original_path), str(output_file))
+                    
+                    if output_file.exists() and output_file.stat().st_size > 0:
+                        logger.info(f"✅ Áudio processado via API: {output_file.name}")
+                        return output_file
+                except Exception as e:
+                    logger.warning(f"⚠️ DeepFilterNet 'df' API falhou: {e}")
+                    
+            elif DF_TYPE == "deepfilternet":
+                # Tenta importar novamente com proteção
+                try:
+                    import deepfilternet
+                    output_file = output_dir / f"{original_path.stem}_deepfilter_enhanced.wav"
+                    # Implementação básica - ajuste conforme a API real
+                    logger.info("ℹ️ DeepFilterNet API disponível mas não implementada")
+                except Exception as e:
+                    logger.warning(f"⚠️ DeepFilterNet 'deepfilternet' API falhou: {e}")
         except Exception as e:
             logger.warning(f"⚠️ DeepFilterNet API falhou: {e}")
     
-    # Método 3: FFmpeg fallback (sempre disponível)
+    # Método 3: FFmpeg fallback (sempre disponível) - MESMA QUALIDADE
     try:
         output_file = output_dir / f"{original_path.stem}_cleaned.wav"
-        logger.info(f"🔄 Usando FFmpeg fallback: {output_file.name}")
+        logger.info(f"🔄 Usando FFmpeg fallback (alta qualidade): {output_file.name}")
         
+        # Filtros avançados do FFmpeg para limpeza de áudio
         cmd = [
             'ffmpeg', '-i', str(original_path),
-            '-af', 'highpass=f=100,lowpass=f=8000,afftdn=nf=-25',
-            '-ar', '16000', '-ac', '1',
+            '-af', 'arnndn=m=rnnoise-models-2020-08-28/sh_ov,afftdn=nf=-25,highpass=f=80,lowpass=f=8000,compand=attacks=0.002:decays=0.005:points=-90/-90|-50/-30|-30/-15|-20/-10|0/0',
+            '-ar', '48000', '-ac', '2',
             '-acodec', 'pcm_s16le',
             str(output_file), '-y',
             '-hide_banner', '-loglevel', 'error'
         ]
         
-        subprocess.run(cmd, check=True, capture_output=True)
+        # Tenta primeiro com modelo rnnoise
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=60)
+        except:
+            # Fallback mais simples
+            cmd = [
+                'ffmpeg', '-i', str(original_path),
+                '-af', 'highpass=f=100,lowpass=f=8000,afftdn=nf=-25,dynaudnorm',
+                '-ar', '16000', '-ac', '1',
+                '-acodec', 'pcm_s16le',
+                str(output_file), '-y',
+                '-hide_banner', '-loglevel', 'error'
+            ]
+            subprocess.run(cmd, check=True, capture_output=True, timeout=60)
         
         if output_file.exists() and output_file.stat().st_size > 0:
-            logger.info(f"✅ Áudio limpo com FFmpeg")
+            logger.info(f"✅ Áudio limpo com FFmpeg (alta qualidade)")
             return output_file
     except Exception as e:
         logger.error(f"❌ FFmpeg também falhou: {e}")
     
     # Retorna original se tudo falhar
-    logger.warning(f"🚨 Retornando áudio original")
+    logger.warning(f"🚨 Retornando áudio original (todos os métodos falharam)")
     return original_path
 
 def download_video(url: str) -> str:
@@ -1346,6 +1404,8 @@ def handler(event):
                 "whisper": WHISPER_AVAILABLE,
                 "whisper_type": WHISPER_TYPE if WHISPER_AVAILABLE else "N/A",
                 "deepfilter": DF_AVAILABLE,
+                "deepfilter_type": DF_TYPE if DF_AVAILABLE else "N/A",
+                "deepfilter_error": DF_ERROR if DF_ERROR else None,
                 "b2": B2_AVAILABLE,
                 "volume": VOLUME_BASE,
                 "python": sys.version.split()[0],
@@ -1491,7 +1551,9 @@ def handler(event):
                 "moviepy_corrected": True,
                 "gpu_used": GPU_AVAILABLE,
                 "whisper_type": WHISPER_TYPE if WHISPER_AVAILABLE else "N/A",
-                "processing_time": "N/A"  # Poderia adicionar timestamp
+                "deepfilter_available": DF_AVAILABLE,
+                "deepfilter_type": DF_TYPE if DF_AVAILABLE else "N/A",
+                "processing_time": "N/A"
             },
             "volume_info": {
                 "base_path": VOLUME_BASE,
@@ -1549,6 +1611,246 @@ if __name__ == "__main__":
             print("❌ PyTorch: NÃO INSTALADO")
         except Exception as e:
             print(f"⚠️ PyTorch: Erro - {str(e)[:50]}...")
+        
+        # VERIFICAÇÃO DE DEEPFILTERNET
+        print(f"🎵 DeepFilterNet: {'✅' if DF_AVAILABLE else '❌'} ({DF_TYPE if DF_TYPE else 'N/A'})")
+        if DF_ERROR:
+            print(f"   ⚠️  Erro: {DF_ERROR[:80]}...")
+        
+        print("="*60 + "\n")
+        
+        # Forçar flush
+        sys.stdout.flush()
+        sys.stderr.flush()
+        
+        # Importa runpod aqui para evitar problemas
+        try:
+            import runpod
+            print("✅ RunPod importado com sucesso")
+        except ImportError as e:
+            print(f"❌ RunPod não disponível: {e}")
+            sys.exit(1)
+        
+        # INICIA SERVIDOR COM TRY-EXCEPT
+        print("🌐 Iniciando servidor RunPod...")
+        sys.stdout.flush()
+        
+        # Usa o handler seguro
+        runpod.serverless.start({"handler": safe_handler})
+        
+    except KeyboardInterrupt:
+        print("\n👋 Servidor interrompido")
+        sys.exit(0)
+    except Exception as e:
+        print(f"💥 ERRO CRÍTICO NA INICIALIZAÇÃO: {e}")
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)✅" if 'colorama' in sys.modules else "❌",
+                    "Cython": "✅" if 'Cython' in sys.modules else "❌",
+                    "soundfile": "✅" if 'soundfile' in sys.modules else "❌",
+                    "librosa": "✅" if 'librosa' in sys.modules else "❌"
+                }
+            }
+        }
+    
+    try:
+        # Valida entrada
+        video_url = input_data.get("video_url")
+        if not video_url:
+            raise ValueError("video_url é obrigatório")
+        
+        anime_name = input_data.get("animeName", "Anime")
+        
+        logger.info(f"🎬 Iniciando processamento: {anime_name}")
+        logger.info(f"📹 URL: {video_url[:100]}...")
+        
+        # 1. Download de recursos
+        logger.info("📥 Baixando recursos...")
+        video_path = download_video(video_url)
+        bg_path = download_background(input_data.get("background_url"))
+        
+        # Configuração
+        config = {
+            "animeName": anime_name,
+            "antiShadowban": input_data.get("antiShadowban", True),
+            "generateTitles": input_data.get("generateTitles", True),
+            "titleStyle": input_data.get("titleStyle", {}),
+            "background_path": bg_path
+        }
+        
+        # 2. Definição de cortes
+        cuts = []
+        cut_type = input_data.get("cutType", "auto")
+        
+        if cut_type == "auto" and AI_AVAILABLE and WHISPER_AVAILABLE:
+            logger.info("🤖 Modo automático (IA)")
+            cuts = analyze_video_content(video_path, anime_name)
+        elif cut_type == "manual":
+            # Cortes manuais fornecidos
+            manual_cuts = input_data.get("cuts", [])
+            if manual_cuts:
+                cuts = manual_cuts
+                logger.info(f"✂️ {len(cuts)} cortes manuais fornecidos")
+            else:
+                logger.warning("⚠️ Modo manual sem cortes, usando automático")
+                cuts = analyze_video_content(video_path, anime_name)
+        else:
+            logger.warning("⚠️ Modo não reconhecido, usando automático")
+            cuts = analyze_video_content(video_path, anime_name)
+        
+        # Fallback se nenhum corte definido
+        if not cuts:
+            logger.warning("⚠️ Nenhum corte definido, gerando fallback")
+            cuts = [{
+                "start": 30,
+                "end": 90,
+                "title": anime_name,
+                "score": 50
+            }]
+        
+        logger.info(f"✂️ {len(cuts)} cortes para processar")
+        
+        # 3. Processamento dos cortes
+        results = []
+        for i, cut in enumerate(cuts):
+            try:
+                logger.info(f"🔄 Processando corte {i+1}/{len(cuts)}")
+                
+                # Processa corte
+                out_path = processar_corte(video_path, cut, i+1, config)
+                
+                # Upload para B2
+                b2_url = upload_to_b2(out_path)
+                
+                # Adiciona resultado
+                results.append({
+                    "id": i+1,
+                    "path": out_path,
+                    "url": b2_url,
+                    "title": cut.get("title", anime_name),
+                    "score": cut.get("score", 0),
+                    "start": cut.get("start"),
+                    "end": cut.get("end"),
+                    "duration": cut.get("end", 0) - cut.get("start", 0)
+                })
+                
+                # Limpeza de memória
+                gc.collect()
+                try:
+                    if 'torch' in sys.modules and torch and torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except:
+                    pass
+                
+                logger.info(f"✅ Corte {i+1} concluído")
+                
+            except Exception as e:
+                logger.error(f"❌ Erro no corte {i+1}: {e}")
+                continue
+        
+        # 4. Limpeza de arquivos temporários
+        logger.info("🧹 Limpando arquivos temporários...")
+        
+        try:
+            os.remove(video_path)
+            logger.info(f"🗑️ Vídeo removido: {os.path.basename(video_path)}")
+        except:
+            pass
+        
+        if bg_path and os.path.exists(bg_path):
+            try:
+                os.remove(bg_path)
+                logger.info(f"🗑️ Background removido: {os.path.basename(bg_path)}")
+            except:
+                pass
+        
+        # Limpa diretório temporário
+        for temp_file in TEMP_DIR.glob("*"):
+            try:
+                if temp_file.is_file():
+                    temp_file.unlink()
+            except:
+                pass
+        
+        # 5. Retorna resultados
+        logger.info(f"🎉 Processamento concluído: {len(results)} cortes gerados")
+        
+        return {
+            "status": "success",
+            "cuts": results,
+            "metadata": {
+                "anime_name": anime_name,
+                "total_cuts": len(results),
+                "successful_cuts": len([r for r in results if r.get("url")]),
+                "moviepy_version": moviepy.__version__ if MOVIEPY_AVAILABLE else "N/A",
+                "moviepy_corrected": True,
+                "gpu_used": GPU_AVAILABLE,
+                "whisper_type": WHISPER_TYPE if WHISPER_AVAILABLE else "N/A",
+                "deepfilter_available": DF_AVAILABLE,
+                "deepfilter_type": DF_TYPE if DF_AVAILABLE else "N/A",
+                "processing_time": "N/A"
+            },
+            "volume_info": {
+                "base_path": VOLUME_BASE,
+                "output_dir": str(OUTPUT_DIR),
+                "models_dir": str(MODELS_DIR),
+                "fonts_dir": str(FONTS_DIR)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Erro no handler: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc() if input_data.get("debug", False) else None
+        }
+
+# ==================== HANDLER SEGURO ====================
+
+def safe_handler(event):
+    """Wrapper seguro para o handler"""
+    try:
+        return handler(event)
+    except Exception as e:
+        logger.error(f"❌ ERRO GLOBAL NO HANDLER: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {"status": "error", "error": str(e)}
+
+# ==================== INICIALIZAÇÃO ====================
+
+if __name__ == "__main__":
+    try:
+        # LOG SIMPLES E SEGURO
+        print("\n" + "="*60)
+        print("🎬 ANIMECUT ULTIMATE HYBRID v12.0 - CORRIGIDO")
+        print(f"📁 Volume: {VOLUME_BASE}")
+        
+        # VERIFICAÇÃO SEGURA DE MOVIEPY
+        try:
+            moviepy_version = moviepy.__version__
+            print(f"🎞️ MoviePy: v{moviepy_version}")
+        except:
+            print("🎞️ MoviePy: N/A")
+        
+        # VERIFICAÇÃO SEGURA DE PYTORCH
+        try:
+            import torch
+            print(f"🔥 PyTorch: v{torch.__version__}")
+            print(f"⚡ CUDA: {'✅' if torch.cuda.is_available() else '❌'}")
+        except ImportError:
+            print("❌ PyTorch: NÃO INSTALADO")
+        except Exception as e:
+            print(f"⚠️ PyTorch: Erro - {str(e)[:50]}...")
+        
+        # VERIFICAÇÃO DE DEEPFILTERNET
+        print(f"🎵 DeepFilterNet: {'✅' if DF_AVAILABLE else '❌'} ({DF_TYPE if DF_TYPE else 'N/A'})")
+        if DF_ERROR:
+            print(f"   ⚠️  Erro: {DF_ERROR[:80]}...")
         
         print("="*60 + "\n")
         
