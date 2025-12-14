@@ -1,3 +1,12 @@
+# ============================================
+# AnimeCut Serverless - Requirements FIXED
+# Compatível com RunPod CUDA 12.1
+# ============================================
+
+# CRÍTICO: NumPy DEVE ser 1.26.x para MoviePy v1.0.3
+# MoviePy v1.0.3 usa np.float/np.int removidos no NumPy 2.0
+numpy==1.26.4
+
 # Dependências básicas
 runpod>=1.6.0
 boto3>=1.34.0
@@ -29,14 +38,16 @@ einops>=0.7.0
 safetensors>=0.4.0
 peft>=0.7.0
 
-# Whisper
+# Whisper - CORRIGIDO para CUDA 12.1
+# onnxruntime-gpu 1.18+ tem builds para CUDA 12
+onnxruntime-gpu>=1.18.0
 faster-whisper>=0.10.0
 openai-whisper>=20231117
-insanely-fast-whisper>=0.0.5
+# NOTA: insanely-fast-whisper comentado - conflitos CUDA 11/12
+# insanely-fast-whisper>=0.0.5
 
 # Visão computacional
 ultralytics>=8.0.0
-numpy>=1.24.0
 pandas>=2.0.0
 
 # Utilitários
