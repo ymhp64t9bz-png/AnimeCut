@@ -1,8 +1,8 @@
-# Use a imagem base do RunPod com CUDA 12.1
-FROM runpod/base:0.4.0-cuda12.1.1
+# CORRIGIDO: Usar imagem PyTorch oficial do RunPod (a base:0.4.0 foi descontinuada)
+FROM runpod/pytorch:2.1.0-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 # Cache Busting
-ENV BUILD_DATE="V13.0_NUMPY_FIXED"
+ENV BUILD_DATE="V14.0_VALID_BASE_IMAGE"
 
 # Configura variáveis de ambiente para GPU
 ENV DEBIAN_FRONTEND=noninteractive
@@ -13,7 +13,6 @@ ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:$LD_LIBRARY_PATH"
 ENV CUDA_HOME="/usr/local/cuda"
 
 # Atualiza sistema e instala dependências do sistema
-# CORRIGIDO: Adicionado libgl1 e mesa-utils para OpenCV
 RUN apt-get update && apt-get install -y \
     wget \
     curl \
@@ -27,9 +26,6 @@ RUN apt-get update && apt-get install -y \
     libgl1 \
     mesa-utils \
     libegl1 \
-    python3-dev \
-    python3-pip \
-    python3-venv \
     build-essential \
     pkg-config \
     cmake \
@@ -55,8 +51,7 @@ RUN pip install --no-cache-dir \
     scipy>=1.11.0 \
     sentencepiece>=0.1.99
 
-# 2. CORRIGIDO: NumPy DEVE ser 1.26.x para compatibilidade com MoviePy v1.0.3
-# MoviePy v1.0.3 usa np.float e np.int que foram removidos no NumPy 2.0
+# 2. NumPy DEVE ser 1.26.x para compatibilidade com MoviePy v1.0.3
 RUN pip install --no-cache-dir "numpy==1.26.4"
 
 # 3. Dependências de processamento de vídeo e imagem
@@ -74,14 +69,7 @@ RUN pip install --no-cache-dir \
     soundfile>=0.12.0 \
     pydub>=0.25.1
 
-# 5. PyTorch com CUDA 12.1 (versão específica para compatibilidade)
-RUN pip install --no-cache-dir \
-    torch==2.1.0 \
-    torchvision==0.16.0 \
-    torchaudio==2.1.0 \
-    --index-url https://download.pytorch.org/whl/cu121
-
-# 6. Dependências de IA e ML
+# 5. Dependências de IA e ML (PyTorch já está na imagem base)
 RUN pip install --no-cache-dir \
     transformers>=4.36.0 \
     optimum>=1.15.0 \
@@ -90,23 +78,18 @@ RUN pip install --no-cache-dir \
     safetensors>=0.4.0 \
     peft>=0.7.0
 
-# 7. CORRIGIDO: Whisper e transcrição - onnxruntime-gpu compatível com CUDA 12
-# insanely-fast-whisper requer onnxruntime-gpu que precisa CUDA 12 builds
+# 6. Whisper e transcrição - onnxruntime-gpu compatível com CUDA 12
 RUN pip install --no-cache-dir \
     "onnxruntime-gpu>=1.18.0" \
     faster-whisper>=0.10.0 \
     openai-whisper>=20231117
 
-# NOTA: insanely-fast-whisper removido temporariamente - causa conflitos CUDA 11/12
-# Se necessário, instalar após verificar compatibilidade:
-# RUN pip install --no-cache-dir insanely-fast-whisper>=0.0.5
-
-# 8. Visão computacional
+# 7. Visão computacional
 RUN pip install --no-cache-dir \
     ultralytics>=8.0.0 \
     pandas>=2.0.0
 
-# 9. Dependências opcionais e utilitários
+# 8. Dependências opcionais e utilitários
 RUN pip install --no-cache-dir \
     psutil>=5.9.0 \
     humanize>=4.8.0 \
@@ -123,7 +106,7 @@ COPY *.txt *.py /workspace/
 # Configura permissões
 RUN chmod +x /workspace/handler.py
 
-# Baixa modelo Whisper pré-treinado para cache (Linha única segura)
+# Baixa modelo Whisper pré-treinado para cache
 RUN python3 -c "from faster_whisper import WhisperModel; import os; os.makedirs('/workspace/models', exist_ok=True); print('Downloading model...'); model = WhisperModel('tiny', device='cpu', compute_type='float32', download_root='/workspace/models')"
 
 # Baixa fontes padrão
@@ -131,7 +114,7 @@ RUN cd /workspace/fonts && \
     wget -q https://github.com/google/fonts/raw/main/ofl/oswald/Oswald-Bold.ttf -O oswald.ttf && \
     wget -q https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Bold.ttf -O roboto.ttf
 
-# Verifica instalações (Linha única segura)
+# Verifica instalações
 RUN python3 -c "import sys; import numpy; print(f'NumPy: {numpy.__version__}'); import torch; import faster_whisper; import moviepy; import cv2; print('Check OK: All packages imported successfully')"
 
 # Limpa cache do pip
