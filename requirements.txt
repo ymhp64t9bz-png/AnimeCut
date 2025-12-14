@@ -29,6 +29,7 @@ deepfilternet
 # Transcrição Acelerada (Flash Attention requer GPU, aqui usamos fallback CPU-safe)
 # insanely-fast-whisper instala transformers e torch, cuidaremos para usar versões compatíveis
 insanely-fast-whisper
+faster-whisper
 transformers>=4.40.0
 accelerate>=0.30.0
 optimum
