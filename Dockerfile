@@ -4,7 +4,7 @@ FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 WORKDIR /app
 
 # Mude isso para forçar o RunPod a ler o novo arquivo (Cache Bust manual)
-ENV BUILD_DATE="V12_HYBRID_B2_FIX" 
+ENV BUILD_DATE="V12.1_GPU_FORCED_OPTIMIZED" 
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
@@ -30,10 +30,11 @@ RUN pip install --upgrade pip
 # Forçamos a versão 1.26.4 que é a última estável da série 1.x
 RUN pip install --no-cache-dir "numpy==1.26.4"
 
-# ==================== 3. FLASH ATTENTION (CORREÇÃO WHEEL) ====================
+# ==================== 3. FLASH ATTENTION & GPU OPTIMIZATION ====================
+# Instala Flash Attention para Whisper Turbo
 RUN pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.5.6/flash_attn-2.5.6+cu122torch2.2cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 
-# ==================== 4. ARSENAL PYTHON ====================
+# ==================== 4. ARSENAL PYTHON CORE ====================
 RUN pip install --no-cache-dir \
     runpod>=1.6.0 \
     boto3>=1.34.0 \
@@ -50,23 +51,16 @@ RUN pip install --no-cache-dir \
     proglog>=0.1.10 \
     deepfilternet
 
-# ==================== 5. WHISPER & IA ====================
+# ==================== 5. WHISPER & IA (GPU FOCUSED) ====================
 RUN pip install --no-cache-dir \
     transformers \
     optimum \
     accelerate \
     scipy \
-    insanely-fast-whisper
-
-# Explicit install request Fix
-RUN pip install transformers faster-whisper accelerate protobuf sentencepiece
-
-# ==================== 6. TOOLS PRO ====================
-RUN pip install --no-cache-dir \
-    basicsr>=1.4.2 \
-    facexlib>=0.2.5 \
-    gfpgan>=1.3.8 \
-    realesrgan>=0.3.0
+    faster-whisper \
+    insanely-fast-whisper \
+    protobuf \
+    sentencepiece
 
 # ==================== 7. BLINDAGEM FINAL NUMPY ====================
 # Reinstalamos numpy 1.26.4 forçadamente no final para garantir integridade
