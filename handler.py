@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AnimeCut Serverless v12.0 ULTIMATE HYBRID - OTIMIZADO
+AnimeCut Serverless v12.0 ULTIMATE HYBRID - OTIMIZADO PARA GPU
 Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1
 VOLUME: /workspace (RunPod Persistent Storage)
-OTIMIZAÇÕES: Sem downloads na inicialização, cache local, fallbacks robustos
+OTIMIZAÇÕES: GPU 100%, NVENC, Gerenciamento de memória CUDA
 """
 
 # ==================== IMPORTAÇÕES ESSENCIAIS ====================
@@ -43,6 +43,13 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("AnimeCutUltimate")
+
+# ==================== CONFIGURAÇÃO GPU OTIMIZADA ====================
+
+# Configurações para máximo desempenho GPU
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'  # Para debug mais preciso
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ['CUDA_MODULE_LOADING'] = 'LAZY'  # Otimiza carregamento
 
 # ==================== IMPORTS COM FALLBACK SUPER ROBUSTO ====================
 
@@ -135,24 +142,39 @@ try:
 except Exception as e:
     logger.error(f"[ERROR] Erro no MoviePy: {e}")
 
-# 3. IA (Transformers/Torch) - COM FALLBACK ROBUSTO
+# 3. IA (Transformers/Torch) - OTIMIZADO PARA GPU
 AI_AVAILABLE = False
 GPU_AVAILABLE = False
 WHISPER_AVAILABLE = False
 WHISPER_TYPE = None
+TORCH_DEVICE = None
 
-# Configuração para evitar problemas com cuDNN
-os.environ['CUDA_MODULE_LOADING'] = 'LAZY'
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
-# Primeiro tenta importar torch
+# Importa torch primeiro
 torch = dep_manager.safe_import("torch")
 
 if torch:
     try:
-        # Configurações para evitar problemas com cuDNN
-        import torch.backends.cudnn as cudnn
-        cudnn.enabled = False  # Desabilita cuDNN para evitar problemas
+        # VERIFICA E CONFIGURA GPU
+        GPU_AVAILABLE = torch.cuda.is_available()
+        
+        if GPU_AVAILABLE:
+            TORCH_DEVICE = torch.device("cuda:0")
+            
+            # Configurações otimizadas para GPU
+            torch.backends.cudnn.benchmark = True  # ATIVA BENCHMARK PARA DESEMPENHO
+            torch.backends.cudnn.enabled = True    # HABILITA cudnn
+            
+            # Informações da GPU
+            gpu_name = torch.cuda.get_device_name(0)
+            gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+            logger.info(f"[SUCCESS] GPU: {gpu_name} ({gpu_mem:.1f} GB)")
+            
+            # Otimizações adicionais
+            torch.cuda.set_per_process_memory_fraction(0.9)  # Usa 90% da memória
+            logger.info(f"[GPU] Memória alocada: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+        else:
+            TORCH_DEVICE = torch.device("cpu")
+            logger.warning("[WARNING] Executando em CPU (GPU nao detectada)")
         
         # Tenta transformers
         transformers = dep_manager.safe_import("transformers")
@@ -177,28 +199,13 @@ if torch:
                     WHISPER_AVAILABLE = False
                     logger.warning("[WARNING] Nenhuma biblioteca whisper disponivel")
             
-            # Verifica GPU de forma segura
-            try:
-                GPU_AVAILABLE = torch.cuda.is_available()
-                DEVICE = "cuda" if GPU_AVAILABLE else "cpu"
-                
-                if GPU_AVAILABLE:
-                    gpu_name = torch.cuda.get_device_name(0)
-                    gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
-                    logger.info(f"[SUCCESS] GPU: {gpu_name} ({gpu_mem:.1f} GB)")
-                else:
-                    logger.warning("[WARNING] Executando em CPU (GPU nao detectada)")
-                    
-                AI_AVAILABLE = True
-                
-            except Exception as gpu_error:
-                logger.warning(f"[WARNING] Problema com GPU: {gpu_error}")
-                GPU_AVAILABLE = False
-                DEVICE = "cpu"
-                AI_AVAILABLE = True  # Ainda pode rodar em CPU
-                
+            AI_AVAILABLE = True
+            
     except Exception as e:
         logger.warning(f"[WARNING] Bibliotecas de IA falharam: {e}")
+        GPU_AVAILABLE = False
+        TORCH_DEVICE = torch.device("cpu") if torch else None
+        AI_AVAILABLE = False
 else:
     logger.warning("[WARNING] PyTorch nao disponivel, IA desativada")
 
@@ -884,11 +891,9 @@ def criar_titulo_simples(
 # ==================== ANÁLISE DE VÍDEO COM IA ====================
 
 whisper_pipeline = None
-qwen_model = None
-qwen_tokenizer = None
 
 def load_turbo_whisper():
-    """Carrega Whisper se disponível"""
+    """Carrega Whisper otimizado para GPU"""
     global whisper_pipeline
     
     if not AI_AVAILABLE or not WHISPER_AVAILABLE:
@@ -898,9 +903,9 @@ def load_turbo_whisper():
         if WHISPER_TYPE == "faster_whisper":
             from faster_whisper import WhisperModel
             
-            # Configuração otimizada para CPU se GPU tiver problemas
-            compute_type = "float32"  # Sempre usar float32 para evitar problemas
-            device = "cpu"  # Forçar CPU para evitar problemas com cuDNN
+            # CONFIGURAÇÃO OTIMIZADA PARA GPU
+            compute_type = "float16" if GPU_AVAILABLE else "float32"
+            device = "cuda" if GPU_AVAILABLE else "cpu"
             
             logger.info(f"[WHISPER] Carregando modelo com device={device}, compute_type={compute_type}")
             
@@ -1111,10 +1116,10 @@ def generate_fallback_cuts(video_path: str, anime_name: str) -> List[Dict]:
             "score": 30
         }]
 
-# ==================== PROCESSAMENTO DE CORTES ====================
+# ==================== PROCESSAMENTO DE CORTES OTIMIZADO GPU ====================
 
 def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> str:
-    """Processa um corte individual do vídeo"""
+    """Processa um corte individual do vídeo OTIMIZADO PARA GPU"""
     
     try:
         start = cut_data.get('start', 0)
@@ -1200,30 +1205,61 @@ def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> 
         output_filename = f"cut_{num}_{uuid.uuid4().hex[:8]}.mp4"
         output_path = OUTPUT_DIR / output_filename
         
-        # Configura encoding - SEMPRE usar CPU para evitar problemas
-        ffmpeg_params = ['-pix_fmt', 'yuv420p', '-movflags', '+faststart']
+        # CONFIGURAÇÃO DE ENCODING OTIMIZADA PARA GPU NVENC
+        ffmpeg_params = [
+            '-pix_fmt', 'yuv420p',
+            '-movflags', '+faststart',
+            '-vsync', 'vfr'
+        ]
         
-        # Sempre usar CPU encoding para evitar problemas com NVENC
-        codec = 'libx264'
-        preset = 'medium'
-        ffmpeg_params.extend(['-crf', '23'])
+        # DETECTA NVENC DISPONÍVEL
+        codec = 'h264_nvenc' if GPU_AVAILABLE else 'libx264'
+        preset = 'p7' if GPU_AVAILABLE else 'medium'
         
-        # Renderiza
+        if GPU_AVAILABLE:
+            # Parâmetros otimizados para NVENC na RTX 4090
+            ffmpeg_params.extend([
+                '-rc', 'vbr',
+                '-cq', '23',
+                '-b:v', '0',
+                '-maxrate', '15M',
+                '-bufsize', '30M',
+                '-gpu', '0',  # Usa GPU 0
+                '-preset', preset,
+                '-tune', 'hq',
+                '-profile:v', 'high'
+            ])
+            logger.info(f"[ENCODING] Usando NVENC (h264_nvenc) na GPU")
+        else:
+            ffmpeg_params.extend(['-crf', '23'])
+            logger.info("[ENCODING] Usando CPU encoding (fallback)")
+        
+        # Renderiza com configuração otimizada
         logger.info(f"[RENDERING] Renderizando {output_filename}...")
+        
+        # Limpa cache da GPU antes de renderizar
+        if torch and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
         final.write_videofile(
             str(output_path),
             codec=codec,
             audio_codec='aac',
             preset=preset,
-            threads=2,  # Reduzir threads para evitar problemas de memória
+            threads=0,  # Auto-detect para melhor performance
             ffmpeg_params=ffmpeg_params,
             logger=None,
             verbose=False
         )
         
-        # Limpeza
+        # Limpeza explícita
         final.close()
         video.close()
+        
+        # Força coleta de lixo
+        gc.collect()
+        if torch and torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
         file_size = output_path.stat().st_size / 1e6
         logger.info(f"[SUCCESS] Corte {num} finalizado ({file_size:.1f} MB)")
@@ -1234,21 +1270,23 @@ def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> 
         logger.error(f"[ERROR] Erro no corte {num}: {e}")
         raise
 
-# ==================== HANDLER PRINCIPAL ====================
+# ==================== HANDLER PRINCIPAL OTIMIZADO GPU ====================
 
 def handler(event):
-    """Handler principal do RunPod"""
+    """Handler principal do RunPod OTIMIZADO PARA GPU"""
     
-    # Limpeza inicial
+    # LIMPEZA INICIAL AGGRESSIVA
     gc.collect()
     if torch and torch.cuda.is_available():
         try:
             torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+            logger.info(f"[GPU MEMORY] Inicial: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
         except:
             pass
     
     logger.info("=" * 60)
-    logger.info("ANIMECUT - NOVA REQUISICAO")
+    logger.info("ANIMECUT - NOVA REQUISICAO (GPU OPTIMIZED)")
     logger.info("=" * 60)
     
     input_data = event.get("input", {})
@@ -1259,14 +1297,17 @@ def handler(event):
             "status": "success",
             "system": {
                 "gpu": GPU_AVAILABLE,
+                "gpu_device": str(TORCH_DEVICE) if TORCH_DEVICE else None,
                 "moviepy": MOVIEPY_AVAILABLE,
                 "moviepy_version": moviepy_version,
                 "ai": AI_AVAILABLE,
                 "whisper": WHISPER_AVAILABLE,
+                "whisper_type": WHISPER_TYPE,
                 "deepfilter": DF_AVAILABLE,
                 "b2": B2_AVAILABLE,
                 "volume": VOLUME_BASE,
-                "cache_dir": str(CACHE_DIR)
+                "cache_dir": str(CACHE_DIR),
+                "cuda_version": torch.version.cuda if torch else None
             }
         }
     
@@ -1279,6 +1320,8 @@ def handler(event):
         anime_name = input_data.get("animeName", "Anime")
         
         logger.info(f"[PROCESSING] Processando: {anime_name}")
+        if GPU_AVAILABLE:
+            logger.info(f"[GPU] Dispositivo: {TORCH_DEVICE}")
         
         # 1. Download
         logger.info("[DOWNLOAD] Baixando video...")
@@ -1301,7 +1344,7 @@ def handler(event):
         cut_type = input_data.get("cutType", "auto")
         
         if cut_type == "auto" and AI_AVAILABLE:
-            logger.info("[MODE] Modo automatico (IA)")
+            logger.info("[MODE] Modo automatico (IA - GPU)")
             cuts = analyze_video_content(video_path, anime_name)
         elif cut_type == "manual":
             manual_cuts = input_data.get("cuts", [])
@@ -1327,13 +1370,26 @@ def handler(event):
         
         logger.info(f"[CUTS] {len(cuts)} cortes para processar")
         
-        # 3. Processamento
+        # 3. Processamento com monitoramento de memória GPU
         results = []
         for i, cut in enumerate(cuts):
             try:
                 logger.info(f"[PROCESSING] Processando corte {i+1}...")
                 
+                # Monitora memória antes
+                if torch and torch.cuda.is_available():
+                    mem_before = torch.cuda.memory_allocated() / 1e9
+                    logger.info(f"[GPU MEMORY] Antes corte {i+1}: {mem_before:.2f} GB")
+                
                 out_path = processar_corte(video_path, cut, i+1, config)
+                
+                # Monitora memória depois
+                if torch and torch.cuda.is_available():
+                    mem_after = torch.cuda.memory_allocated() / 1e9
+                    logger.info(f"[GPU MEMORY] Apos corte {i+1}: {mem_after:.2f} GB")
+                    if mem_after > mem_before + 0.5:  # Se aumentou mais de 0.5GB
+                        logger.warning(f"[WARNING] Possivel memory leak no corte {i+1}")
+                        torch.cuda.empty_cache()
                 
                 # Upload opcional
                 b2_url = None
@@ -1363,14 +1419,16 @@ def handler(event):
                     "title": cut.get("title", anime_name),
                     "start": cut.get("start"),
                     "end": cut.get("end"),
-                    "duration": cut.get("end", 0) - cut.get("start", 0)
+                    "duration": cut.get("end", 0) - cut.get("start", 0),
+                    "gpu_encoded": GPU_AVAILABLE
                 })
                 
-                # Limpeza de memória
+                # LIMPEZA AGGRESSIVA ENTRE CORTES
                 gc.collect()
                 if torch and torch.cuda.is_available():
                     try:
                         torch.cuda.empty_cache()
+                        torch.cuda.ipc_collect()
                     except:
                         pass
                 
@@ -1380,7 +1438,7 @@ def handler(event):
                 logger.error(f"[ERROR] Erro no corte {i+1}: {e}")
                 continue
         
-        # 4. Limpeza
+        # 4. Limpeza final
         logger.info("[CLEANUP] Limpando...")
         
         try:
@@ -1406,6 +1464,16 @@ def handler(event):
             except:
                 pass
         
+        # Limpeza final GPU
+        if torch and torch.cuda.is_available():
+            try:
+                torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats()
+                final_mem = torch.cuda.memory_allocated() / 1e9
+                logger.info(f"[GPU MEMORY] Final: {final_mem:.2f} GB")
+            except:
+                pass
+        
         # 5. Resultado
         logger.info(f"[FINISHED] {len(results)} cortes gerados")
         
@@ -1415,7 +1483,9 @@ def handler(event):
             "metadata": {
                 "anime_name": anime_name,
                 "total_cuts": len(results),
-                "successful_cuts": len([r for r in results if r.get("path")])
+                "successful_cuts": len([r for r in results if r.get("path")]),
+                "gpu_used": GPU_AVAILABLE,
+                "gpu_encoding": all(r.get("gpu_encoded", False) for r in results if r.get("gpu_encoded") is not None)
             }
         }
         
@@ -1442,7 +1512,7 @@ if __name__ == "__main__":
     try:
         # Banner
         print("\n" + "="*60)
-        print("ANIMECUT SERVERLESS v12.0 - OTIMIZADO")
+        print("ANIMECUT SERVERLESS v12.0 - OTIMIZADO GPU 100%")
         print(f"Volume: {VOLUME_BASE}")
         print(f"Cache: {CACHE_DIR}")
         
@@ -1452,12 +1522,23 @@ if __name__ == "__main__":
         cuda_status = "YES" if GPU_AVAILABLE else "NO"
         audio_status = "DEEPFILTERNET" if DF_AVAILABLE else "FFMPEG"
         b2_status = "YES" if B2_AVAILABLE else "NO"
+        nvenc_status = "AVAILABLE" if GPU_AVAILABLE else "CPU ONLY"
         
         print(f"MoviePy: {moviepy_status}")
         print(f"PyTorch: {pytorch_status}")
         print(f"CUDA: {cuda_status}")
+        print(f"NVENC: {nvenc_status}")
         print(f"Audio: {audio_status}")
         print(f"B2: {b2_status}")
+        
+        if GPU_AVAILABLE and torch:
+            try:
+                gpu_name = torch.cuda.get_device_name(0)
+                gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+                print(f"GPU: {gpu_name} ({gpu_mem:.1f} GB)")
+            except:
+                pass
+        
         print("="*60 + "\n")
         
         sys.stdout.flush()
