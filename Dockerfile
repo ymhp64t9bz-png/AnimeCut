@@ -2,7 +2,7 @@
 FROM runpod/base:0.4.0-cuda12.1.1
 
 # Cache Busting
-ENV BUILD_DATE="V12.3_FINAL_GPU"
+ENV BUILD_DATE="V12.4_FIXED_SYNTAX"
 
 # Configura variáveis de ambiente para GPU
 ENV DEBIAN_FRONTEND=noninteractive
@@ -102,8 +102,7 @@ RUN pip install --no-cache-dir \
     nvidia-ml-py3>=7.352.0
 
 # Cria diretórios necessários
-RUN mkdir -p /workspace/{output,models,fonts,cache,temp} \
-    && mkdir -p /tmp/animecut
+RUN mkdir -p /workspace/output /workspace/models /workspace/fonts /workspace/cache /workspace/temp /tmp/animecut
 
 # Copia fonte do projeto
 COPY handler.py /workspace/handler.py
@@ -112,60 +111,16 @@ COPY *.txt *.py /workspace/
 # Configura permissões
 RUN chmod +x /workspace/handler.py
 
-# Baixa modelo Whisper pré-treinado para cache
-RUN python3 -c "
-from faster_whisper import WhisperModel
-import os
-os.makedirs('/workspace/models', exist_ok=True)
-try:
-print('Baixando modelo Whisper para cache...')
-model = WhisperModel('tiny', device='cpu', compute_type='float32', download_root='/workspace/models')
-print('Modelo Whisper baixado com sucesso')
-except Exception as e:
-print(f'Erro ao baixar modelo: {e}')
-"
+# Baixa modelo Whisper pré-treinado para cache (Linha única segura)
+RUN python3 -c "from faster_whisper import WhisperModel; import os; os.makedirs('/workspace/models', exist_ok=True); print('Downloading model...'); model = WhisperModel('tiny', device='cpu', compute_type='float32', download_root='/workspace/models')"
 
 # Baixa fontes padrão
 RUN cd /workspace/fonts && \
     wget -q https://github.com/google/fonts/raw/main/ofl/oswald/Oswald-Bold.ttf -O oswald.ttf && \
     wget -q https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Bold.ttf -O roboto.ttf
 
-# Verifica instalações
-RUN python3 -c "
-import sys
-print('Python:', sys.version)
-print('\\nVerificando pacotes...')
-
-try:
-import torch
-print(f'PyTorch: {torch.__version__}')
-print(f'CUDA disponível: {torch.cuda.is_available()}')
-if torch.cuda.is_available():
-print(f'GPU: {torch.cuda.get_device_name(0)}')
-print(f'CUDA Version: {torch.version.cuda}')
-except Exception as e:
-print(f'PyTorch error: {e}')
-
-try:
-import faster_whisper
-print('faster-whisper: OK')
-except Exception as e:
-print(f'faster-whisper error: {e}')
-
-try:
-import moviepy
-print(f'moviepy: {moviepy.__version__}')
-except Exception as e:
-print(f'moviepy error: {e}')
-
-try:
-import cv2
-print(f'OpenCV: {cv2.__version__}')
-except Exception as e:
-print(f'OpenCV error: {e}')
-
-print('\\nTodas as verificações concluídas!')
-"
+# Verifica instalações (Linha única segura)
+RUN python3 -c "import sys; import torch; import faster_whisper; import moviepy; import cv2; print('Check OK: All packages imported successfully')"
 
 # Limpa cache do pip
 RUN pip cache purge
