@@ -1,6 +1,9 @@
 # Use a imagem base do RunPod com CUDA 12.1
 FROM runpod/base:0.4.0-cuda12.1.1
 
+# Cache Busting
+ENV BUILD_DATE="V12.3_FINAL_GPU"
+
 # Configura variáveis de ambiente para GPU
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
