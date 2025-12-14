@@ -2,7 +2,7 @@
 FROM runpod/base:0.4.0-cuda12.1.1
 
 # Cache Busting
-ENV BUILD_DATE="V12.4_FIXED_SYNTAX"
+ENV BUILD_DATE="V13.0_NUMPY_FIXED"
 
 # Configura variáveis de ambiente para GPU
 ENV DEBIAN_FRONTEND=noninteractive
@@ -13,6 +13,7 @@ ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:$LD_LIBRARY_PATH"
 ENV CUDA_HOME="/usr/local/cuda"
 
 # Atualiza sistema e instala dependências do sistema
+# CORRIGIDO: Adicionado libgl1 e mesa-utils para OpenCV
 RUN apt-get update && apt-get install -y \
     wget \
     curl \
@@ -23,6 +24,9 @@ RUN apt-get update && apt-get install -y \
     libxrender-dev \
     libglib2.0-0 \
     libsndfile1 \
+    libgl1 \
+    mesa-utils \
+    libegl1 \
     python3-dev \
     python3-pip \
     python3-venv \
@@ -51,7 +55,11 @@ RUN pip install --no-cache-dir \
     scipy>=1.11.0 \
     sentencepiece>=0.1.99
 
-# 2. Dependências de processamento de vídeo e imagem
+# 2. CORRIGIDO: NumPy DEVE ser 1.26.x para compatibilidade com MoviePy v1.0.3
+# MoviePy v1.0.3 usa np.float e np.int que foram removidos no NumPy 2.0
+RUN pip install --no-cache-dir "numpy==1.26.4"
+
+# 3. Dependências de processamento de vídeo e imagem
 RUN pip install --no-cache-dir \
     "moviepy==1.0.3" \
     imageio-ffmpeg>=0.5.1 \
@@ -60,20 +68,20 @@ RUN pip install --no-cache-dir \
     proglog>=0.1.10 \
     imageio>=2.31.0
 
-# 3. Dependências de áudio
+# 4. Dependências de áudio
 RUN pip install --no-cache-dir \
     librosa>=0.10.0 \
     soundfile>=0.12.0 \
     pydub>=0.25.1
 
-# 4. PyTorch com CUDA 12.1 (versão específica para compatibilidade)
+# 5. PyTorch com CUDA 12.1 (versão específica para compatibilidade)
 RUN pip install --no-cache-dir \
     torch==2.1.0 \
     torchvision==0.16.0 \
     torchaudio==2.1.0 \
     --index-url https://download.pytorch.org/whl/cu121
 
-# 5. Dependências de IA e ML
+# 6. Dependências de IA e ML
 RUN pip install --no-cache-dir \
     transformers>=4.36.0 \
     optimum>=1.15.0 \
@@ -82,19 +90,23 @@ RUN pip install --no-cache-dir \
     safetensors>=0.4.0 \
     peft>=0.7.0
 
-# 6. Whisper e transcrição (instala separadamente para evitar conflitos)
+# 7. CORRIGIDO: Whisper e transcrição - onnxruntime-gpu compatível com CUDA 12
+# insanely-fast-whisper requer onnxruntime-gpu que precisa CUDA 12 builds
 RUN pip install --no-cache-dir \
+    "onnxruntime-gpu>=1.18.0" \
     faster-whisper>=0.10.0 \
-    openai-whisper>=20231117 \
-    insanely-fast-whisper>=0.0.5
+    openai-whisper>=20231117
 
-# 7. Visão computacional
+# NOTA: insanely-fast-whisper removido temporariamente - causa conflitos CUDA 11/12
+# Se necessário, instalar após verificar compatibilidade:
+# RUN pip install --no-cache-dir insanely-fast-whisper>=0.0.5
+
+# 8. Visão computacional
 RUN pip install --no-cache-dir \
     ultralytics>=8.0.0 \
-    numpy>=1.24.0 \
     pandas>=2.0.0
 
-# 8. Dependências opcionais e utilitários
+# 9. Dependências opcionais e utilitários
 RUN pip install --no-cache-dir \
     psutil>=5.9.0 \
     humanize>=4.8.0 \
@@ -120,7 +132,7 @@ RUN cd /workspace/fonts && \
     wget -q https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Bold.ttf -O roboto.ttf
 
 # Verifica instalações (Linha única segura)
-RUN python3 -c "import sys; import torch; import faster_whisper; import moviepy; import cv2; print('Check OK: All packages imported successfully')"
+RUN python3 -c "import sys; import numpy; print(f'NumPy: {numpy.__version__}'); import torch; import faster_whisper; import moviepy; import cv2; print('Check OK: All packages imported successfully')"
 
 # Limpa cache do pip
 RUN pip cache purge
