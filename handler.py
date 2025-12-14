@@ -44,12 +44,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger("AnimeCutUltimate")
 
-# ==================== CONFIGURAÇÃO GPU OTIMIZADA ====================
+# ==================== CONFIGURAÇÃO GPU AGGRESSIVA ====================
 
-# Configurações para máximo desempenho GPU
-os.environ['CUDA_LAUNCH_BLOCKING'] = '1'  # Para debug mais preciso
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-os.environ['CUDA_MODULE_LOADING'] = 'LAZY'  # Otimiza carregamento
+# CONFIGURAÇÕES AGGRESSIVAS PARA FORÇAR GPU
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
+os.environ['NVIDIA_VISIBLE_DEVICES'] = 'all'
+os.environ['NVIDIA_DRIVER_CAPABILITIES'] = 'compute,utility'
 
 # ==================== IMPORTS COM FALLBACK SUPER ROBUSTO ====================
 
@@ -142,39 +146,91 @@ try:
 except Exception as e:
     logger.error(f"[ERROR] Erro no MoviePy: {e}")
 
-# 3. IA (Transformers/Torch) - OTIMIZADO PARA GPU
+# 3. IA (Transformers/Torch) - FORÇADO GPU 100%
 AI_AVAILABLE = False
 GPU_AVAILABLE = False
 WHISPER_AVAILABLE = False
 WHISPER_TYPE = None
 TORCH_DEVICE = None
+FORCE_GPU = True  # FLAG PARA FORÇAR GPU
 
-# Importa torch primeiro
+# ==================== VERIFICAÇÃO GPU AGGRESSIVA ====================
+def verificar_gpu_agressiva():
+    """Verificação agressiva da GPU com múltiplos métodos"""
+    import subprocess
+    import ctypes
+    
+    logger.info("[GPU CHECK] Verificação agressiva iniciada...")
+    
+    # Método 1: nvidia-smi
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader'],
+                              capture_output=True, text=True, timeout=5)
+        if result.returncode == 0 and 'failed' not in result.stdout.lower():
+            logger.info(f"[GPU CHECK] nvidia-smi OK: {result.stdout.strip()}")
+            return True
+    except Exception as e:
+        logger.warning(f"[GPU CHECK] nvidia-smi falhou: {e}")
+    
+    # Método 2: libcuda
+    try:
+        cuda = ctypes.cdll.LoadLibrary("libcudart.so")
+        logger.info("[GPU CHECK] CUDA Runtime detectado")
+        return True
+    except Exception as e:
+        logger.warning(f"[GPU CHECK] CUDA Runtime falhou: {e}")
+    
+    return False
+
+# Executa verificação GPU antes de importar torch
+GPU_DETECTED = verificar_gpu_agressiva()
+
+if not GPU_DETECTED:
+    logger.critical("[CRITICAL] GPU não detectada na verificação agressiva")
+    FORCE_GPU = False
+
+# Importa torch AGORA
 torch = dep_manager.safe_import("torch")
 
 if torch:
     try:
-        # VERIFICA E CONFIGURA GPU
-        GPU_AVAILABLE = torch.cuda.is_available()
-        
-        if GPU_AVAILABLE:
+        # FORÇA GPU se detectada
+        if GPU_DETECTED and FORCE_GPU:
+            # Configurações OTIMIZADAS para GPU RunPod
+            torch.backends.cudnn.enabled = True
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            
+            # FORÇA device CUDA
             TORCH_DEVICE = torch.device("cuda:0")
+            torch.cuda.set_device(0)
             
-            # Configurações otimizadas para GPU
-            torch.backends.cudnn.benchmark = True  # ATIVA BENCHMARK PARA DESEMPENHO
-            torch.backends.cudnn.enabled = True    # HABILITA cudnn
+            # Verifica CUDA
+            GPU_AVAILABLE = torch.cuda.is_available()
             
-            # Informações da GPU
-            gpu_name = torch.cuda.get_device_name(0)
-            gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
-            logger.info(f"[SUCCESS] GPU: {gpu_name} ({gpu_mem:.1f} GB)")
-            
-            # Otimizações adicionais
-            torch.cuda.set_per_process_memory_fraction(0.9)  # Usa 90% da memória
-            logger.info(f"[GPU] Memória alocada: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+            if GPU_AVAILABLE:
+                gpu_name = torch.cuda.get_device_name(0)
+                gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+                logger.info(f"[SUCCESS] GPU FORÇADA: {gpu_name} ({gpu_mem:.1f} GB)")
+                logger.info(f"[GPU] CUDA Version: {torch.version.cuda}")
+                
+                # Configura memória
+                torch.cuda.empty_cache()
+                torch.cuda.set_per_process_memory_fraction(0.85)
+            else:
+                logger.critical("[CRITICAL] PyTorch CUDA não disponível após forçar")
+                GPU_AVAILABLE = False
+                TORCH_DEVICE = torch.device("cpu")
         else:
-            TORCH_DEVICE = torch.device("cpu")
-            logger.warning("[WARNING] Executando em CPU (GPU nao detectada)")
+            GPU_AVAILABLE = torch.cuda.is_available()
+            if GPU_AVAILABLE:
+                TORCH_DEVICE = torch.device("cuda:0")
+                gpu_name = torch.cuda.get_device_name(0)
+                logger.info(f"[SUCCESS] GPU detectada: {gpu_name}")
+            else:
+                TORCH_DEVICE = torch.device("cpu")
+                logger.warning("[WARNING] Executando em CPU")
         
         # Tenta transformers
         transformers = dep_manager.safe_import("transformers")
@@ -182,22 +238,63 @@ if torch:
         if transformers:
             from transformers import pipeline, AutoModelForCausalLM, AutoTokenizer
             
-            # Tenta faster_whisper primeiro
+            # ==================== WHISPER GPU FORÇADO ====================
             try:
                 from faster_whisper import WhisperModel
                 WHISPER_AVAILABLE = True
                 WHISPER_TYPE = "faster_whisper"
-                logger.info("[SUCCESS] faster-whisper disponivel")
-            except ImportError:
-                # Tenta openai-whisper como fallback
-                try:
-                    import whisper
-                    WHISPER_AVAILABLE = True
-                    WHISPER_TYPE = "openai_whisper"
-                    logger.info("[SUCCESS] openai-whisper disponivel (fallback)")
-                except ImportError:
-                    WHISPER_AVAILABLE = False
-                    logger.warning("[WARNING] Nenhuma biblioteca whisper disponivel")
+                
+                # VERIFICAÇÃO DE GPU PARA WHISPER
+                whisper_gpu_available = False
+                
+                if GPU_AVAILABLE and FORCE_GPU:
+                    # Tenta múltiplas combinações para GPU
+                    whisper_configs = [
+                        {"device": "cuda", "compute_type": "float16"},
+                        {"device": "cuda", "compute_type": "float32"},
+                        {"device": "cuda", "compute_type": "int8_float16"},
+                    ]
+                    
+                    for config in whisper_configs:
+                        try:
+                            logger.info(f"[WHISPER GPU] Tentando config: {config}")
+                            test_model = WhisperModel(
+                                "tiny",  # Modelo pequeno para teste
+                                device=config["device"],
+                                compute_type=config["compute_type"],
+                                download_root=str(MODELS_DIR)
+                            )
+                            
+                            # Testa o modelo
+                            test_audio = bytes(16000 * 2)
+                            segments, info = test_model.transcribe(
+                                test_audio,
+                                language=None,
+                                beam_size=1
+                            )
+                            
+                            whisper_gpu_available = True
+                            logger.info(f"[SUCCESS] Whisper GPU funciona com {config}")
+                            break
+                            
+                        except Exception as e:
+                            logger.warning(f"[WHISPER GPU] Config {config} falhou: {str(e)[:100]}")
+                            continue
+                
+                if whisper_gpu_available or (GPU_AVAILABLE and FORCE_GPU):
+                    logger.info("[WHISPER] Configurando para GPU forçada...")
+                    WHISPER_DEVICE = "cuda"
+                    WHISPER_COMPUTE_TYPE = "float16"
+                else:
+                    WHISPER_DEVICE = "cpu"
+                    WHISPER_COMPUTE_TYPE = "float32"
+                    logger.warning("[WHISPER] Usando CPU como fallback")
+                
+                logger.info(f"[SUCCESS] faster-whisper disponivel (device={WHISPER_DEVICE})")
+                
+            except ImportError as e:
+                logger.error(f"[ERROR] faster-whisper falhou: {e}")
+                WHISPER_AVAILABLE = False
             
             AI_AVAILABLE = True
             
@@ -888,12 +985,12 @@ def criar_titulo_simples(
         logger.warning(f"[WARNING] Erro ao criar titulo: {e}")
         return None
 
-# ==================== ANÁLISE DE VÍDEO COM IA ====================
+# ==================== ANÁLISE DE VÍDEO COM IA - GPU FORÇADA ====================
 
 whisper_pipeline = None
 
 def load_turbo_whisper():
-    """Carrega Whisper otimizado para GPU"""
+    """Carrega Whisper FORÇADO GPU 100%"""
     global whisper_pipeline
     
     if not AI_AVAILABLE or not WHISPER_AVAILABLE:
@@ -903,25 +1000,72 @@ def load_turbo_whisper():
         if WHISPER_TYPE == "faster_whisper":
             from faster_whisper import WhisperModel
             
-            # CONFIGURAÇÃO OTIMIZADA PARA GPU
-            compute_type = "float16" if GPU_AVAILABLE else "float32"
-            device = "cuda" if GPU_AVAILABLE else "cpu"
-            
-            logger.info(f"[WHISPER] Carregando modelo com device={device}, compute_type={compute_type}")
-            
-            whisper_model = WhisperModel(
-                "large-v3",
-                device=device,
-                compute_type=compute_type,
-                download_root=str(MODELS_DIR),
-                cpu_threads=4
-            )
+            # ==================== CONFIGURAÇÃO GPU FORÇADA ====================
+            # SEM FALLBACK PARA CPU - APENAS GPU
+            if GPU_AVAILABLE and FORCE_GPU:
+                device = "cuda"
+                compute_type = "float16"
+                
+                logger.info(f"[WHISPER GPU] FORÇANDO GPU: device={device}, compute_type={compute_type}")
+                
+                # Tenta carregar com GPU
+                try:
+                    whisper_model = WhisperModel(
+                        "large-v3",
+                        device=device,
+                        compute_type=compute_type,
+                        download_root=str(MODELS_DIR),
+                        cpu_threads=2,
+                        num_workers=1
+                    )
+                    
+                    # Testa se GPU funciona
+                    test_audio = bytes(16000 * 2)
+                    segments, info = whisper_model.transcribe(
+                        test_audio,
+                        language=None,
+                        beam_size=1
+                    )
+                    
+                    logger.info("[WHISPER GPU] Teste GPU bem-sucedido")
+                    
+                except Exception as e:
+                    logger.error(f"[WHISPER GPU] GPU falhou, tentando fallback...: {str(e)[:100]}")
+                    # Fallback para float32 na GPU
+                    try:
+                        whisper_model = WhisperModel(
+                            "large-v3",
+                            device="cuda",
+                            compute_type="float32",
+                            download_root=str(MODELS_DIR)
+                        )
+                        logger.info("[WHISPER GPU] Carregado com float32 na GPU")
+                    except Exception as e2:
+                        logger.critical(f"[WHISPER GPU] GPU completamente falhou: {e2}")
+                        raise Exception("Whisper GPU não disponível")
+            else:
+                # Se não for para forçar GPU, usa configuração normal
+                device = "cuda" if GPU_AVAILABLE else "cpu"
+                compute_type = "float16" if GPU_AVAILABLE else "float32"
+                logger.info(f"[WHISPER] Configuração normal: device={device}, compute_type={compute_type}")
+                
+                whisper_model = WhisperModel(
+                    "large-v3",
+                    device=device,
+                    compute_type=compute_type,
+                    download_root=str(MODELS_DIR),
+                    cpu_threads=4
+                )
             
             class WhisperWrapper:
                 def __init__(self, model):
                     self.model = model
+                    self.gpu = device == "cuda"
                 
                 def __call__(self, audio_path, **kwargs):
+                    if self.gpu and torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    
                     segments, info = self.model.transcribe(
                         audio_path,
                         language="pt",
@@ -937,17 +1081,18 @@ def load_turbo_whisper():
                             "timestamp": (segment.start, segment.end)
                         })
                     
-                    return {"chunks": chunks}
+                    return {"chunks": chunks, "device": "gpu" if self.gpu else "cpu"}
             
             whisper_pipeline = WhisperWrapper(whisper_model)
-            logger.info("[SUCCESS] Whisper carregado")
+            device_type = "GPU" if whisper_pipeline.gpu else "CPU"
+            logger.info(f"[SUCCESS] Whisper carregado em {device_type}")
             
     except Exception as e:
         logger.error(f"[ERROR] Erro ao carregar Whisper: {e}")
         whisper_pipeline = None
 
 def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
-    """Analisa vídeo para encontrar cenas virais"""
+    """Analisa vídeo para encontrar cenas virais - GPU FORÇADA"""
     
     if not AI_AVAILABLE or not WHISPER_AVAILABLE:
         logger.warning("[WARNING] IA nao disponivel, usando heuristica")
@@ -978,9 +1123,21 @@ def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
         # Limpa áudio (usando qualidade média para ser mais rápido)
         clean_audio = clean_audio_ffmpeg(raw_audio, quality="medium")
         
-        # Transcrição
-        logger.info("[TRANSCRIPTION] Transcrevendo...")
+        # Transcrição - LOG EXPLÍCITO DE GPU
+        logger.info("[TRANSCRIPTION] Transcrevendo com GPU...")
+        
+        # Limpa memória GPU antes
+        if torch and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            mem_before = torch.cuda.memory_allocated() / 1e9
+            logger.info(f"[GPU MEM] Antes transcrição: {mem_before:.2f} GB")
+        
         result = whisper_pipeline(str(clean_audio))
+        
+        # Log de dispositivo usado
+        device_used = result.get("device", "unknown")
+        logger.info(f"[TRANSCRIPTION] Concluída em {device_used.upper()}")
         
         # Processa transcrição
         transcript = []
@@ -1039,7 +1196,8 @@ def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
                         "start": start,
                         "end": end,
                         "title": f"{anime_name} - ACAO {i+1}",
-                        "score": 85
+                        "score": 85,
+                        "gpu_analyzed": device_used == "gpu"
                     })
         
         # Se não encontrou ações suficientes, usa diálogos importantes
@@ -1057,7 +1215,8 @@ def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
                             "start": start,
                             "end": end,
                             "title": f"{anime_name} - CENA {len(cuts)+1}",
-                            "score": 75
+                            "score": 75,
+                            "gpu_analyzed": device_used == "gpu"
                         })
         
         # Fallback: divide o vídeo em partes iguais
@@ -1072,10 +1231,11 @@ def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
                         "start": start,
                         "end": end,
                         "title": f"{anime_name} - Parte {i+1}",
-                        "score": 65
+                        "score": 65,
+                        "gpu_analyzed": False
                     })
         
-        logger.info(f"[ANALYSIS] {len(cuts)} cortes identificados")
+        logger.info(f"[ANALYSIS] {len(cuts)} cortes identificados (GPU: {device_used == 'gpu'})")
         return cuts
         
     except Exception as e:
@@ -1102,7 +1262,8 @@ def generate_fallback_cuts(video_path: str, anime_name: str) -> List[Dict]:
                 "start": start,
                 "end": end,
                 "title": f"{anime_name} - Parte {i+1}",
-                "score": 50
+                "score": 50,
+                "gpu_analyzed": False
             })
         
         return cuts
@@ -1113,7 +1274,8 @@ def generate_fallback_cuts(video_path: str, anime_name: str) -> List[Dict]:
             "start": 30,
             "end": 90,
             "title": anime_name,
-            "score": 30
+            "score": 30,
+            "gpu_analyzed": False
         }]
 
 # ==================== PROCESSAMENTO DE CORTES OTIMIZADO GPU ====================
@@ -1205,34 +1367,46 @@ def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> 
         output_filename = f"cut_{num}_{uuid.uuid4().hex[:8]}.mp4"
         output_path = OUTPUT_DIR / output_filename
         
-        # CONFIGURAÇÃO DE ENCODING OTIMIZADA PARA GPU NVENC
+        # ==================== NVENC FORÇADO ====================
         ffmpeg_params = [
             '-pix_fmt', 'yuv420p',
             '-movflags', '+faststart',
             '-vsync', 'vfr'
         ]
         
-        # DETECTA NVENC DISPONÍVEL
-        codec = 'h264_nvenc' if GPU_AVAILABLE else 'libx264'
-        preset = 'p7' if GPU_AVAILABLE else 'medium'
-        
+        # VERIFICA NVENC
+        nvenc_available = False
         if GPU_AVAILABLE:
-            # Parâmetros otimizados para NVENC na RTX 4090
+            try:
+                result = subprocess.run(['ffmpeg', '-encoders'], 
+                                      capture_output=True, text=True, timeout=5)
+                nvenc_available = 'h264_nvenc' in result.stdout or 'hevc_nvenc' in result.stdout
+            except:
+                nvenc_available = False
+        
+        # ESCOLHA CODEC FORÇADA
+        if GPU_AVAILABLE and nvenc_available and FORCE_GPU:
+            codec = 'h264_nvenc'
+            preset = 'p7'
+            
             ffmpeg_params.extend([
                 '-rc', 'vbr',
                 '-cq', '23',
                 '-b:v', '0',
-                '-maxrate', '15M',
-                '-bufsize', '30M',
-                '-gpu', '0',  # Usa GPU 0
+                '-maxrate', '10M',
+                '-bufsize', '20M',
+                '-gpu', '0',
                 '-preset', preset,
                 '-tune', 'hq',
-                '-profile:v', 'high'
+                '-profile:v', 'high',
+                '-level', '5.1'
             ])
-            logger.info(f"[ENCODING] Usando NVENC (h264_nvenc) na GPU")
+            logger.info(f"[NVENC FORÇADO] Usando {codec} na GPU")
         else:
+            codec = 'libx264'
+            preset = 'medium'
             ffmpeg_params.extend(['-crf', '23'])
-            logger.info("[ENCODING] Usando CPU encoding (fallback)")
+            logger.warning(f"[CPU ENCODING] NVENC não disponível, usando {codec}")
         
         # Renderiza com configuração otimizada
         logger.info(f"[RENDERING] Renderizando {output_filename}...")
@@ -1240,17 +1414,24 @@ def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> 
         # Limpa cache da GPU antes de renderizar
         if torch and torch.cuda.is_available():
             torch.cuda.empty_cache()
+            mem_before = torch.cuda.memory_allocated() / 1e9
+            logger.info(f"[GPU MEM] Antes render: {mem_before:.2f} GB")
         
         final.write_videofile(
             str(output_path),
             codec=codec,
             audio_codec='aac',
             preset=preset,
-            threads=0,  # Auto-detect para melhor performance
+            threads=0 if GPU_AVAILABLE else 2,  # Auto-detect para GPU
             ffmpeg_params=ffmpeg_params,
             logger=None,
             verbose=False
         )
+        
+        # Monitora memória depois
+        if torch and torch.cuda.is_available():
+            mem_after = torch.cuda.memory_allocated() / 1e9
+            logger.info(f"[GPU MEM] Depois render: {mem_after:.2f} GB")
         
         # Limpeza explícita
         final.close()
@@ -1281,12 +1462,14 @@ def handler(event):
         try:
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
-            logger.info(f"[GPU MEMORY] Inicial: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+            mem_initial = torch.cuda.memory_allocated() / 1e9
+            logger.info(f"[GPU MEMORY] Inicial: {mem_initial:.2f} GB")
+            logger.info(f"[GPU] Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
         except:
             pass
     
     logger.info("=" * 60)
-    logger.info("ANIMECUT - NOVA REQUISICAO (GPU OPTIMIZED)")
+    logger.info("ANIMECUT - NOVA REQUISICAO (GPU FORÇADA)")
     logger.info("=" * 60)
     
     input_data = event.get("input", {})
@@ -1297,6 +1480,7 @@ def handler(event):
             "status": "success",
             "system": {
                 "gpu": GPU_AVAILABLE,
+                "gpu_forced": FORCE_GPU,
                 "gpu_device": str(TORCH_DEVICE) if TORCH_DEVICE else None,
                 "moviepy": MOVIEPY_AVAILABLE,
                 "moviepy_version": moviepy_version,
@@ -1322,6 +1506,8 @@ def handler(event):
         logger.info(f"[PROCESSING] Processando: {anime_name}")
         if GPU_AVAILABLE:
             logger.info(f"[GPU] Dispositivo: {TORCH_DEVICE}")
+            if FORCE_GPU:
+                logger.info("[GPU] MODO FORÇADO ATIVADO")
         
         # 1. Download
         logger.info("[DOWNLOAD] Baixando video...")
@@ -1344,7 +1530,7 @@ def handler(event):
         cut_type = input_data.get("cutType", "auto")
         
         if cut_type == "auto" and AI_AVAILABLE:
-            logger.info("[MODE] Modo automatico (IA - GPU)")
+            logger.info("[MODE] Modo automatico (IA - GPU FORÇADA)")
             cuts = analyze_video_content(video_path, anime_name)
         elif cut_type == "manual":
             manual_cuts = input_data.get("cuts", [])
@@ -1365,10 +1551,12 @@ def handler(event):
                 "start": 30,
                 "end": 90,
                 "title": anime_name,
-                "score": 50
+                "score": 50,
+                "gpu_analyzed": False
             }]
         
-        logger.info(f"[CUTS] {len(cuts)} cortes para processar")
+        gpu_analyzed = any(cut.get("gpu_analyzed", False) for cut in cuts)
+        logger.info(f"[CUTS] {len(cuts)} cortes para processar (GPU Analisados: {gpu_analyzed})")
         
         # 3. Processamento com monitoramento de memória GPU
         results = []
@@ -1420,7 +1608,8 @@ def handler(event):
                     "start": cut.get("start"),
                     "end": cut.get("end"),
                     "duration": cut.get("end", 0) - cut.get("start", 0),
-                    "gpu_encoded": GPU_AVAILABLE
+                    "gpu_encoded": GPU_AVAILABLE and FORCE_GPU,
+                    "gpu_analyzed": cut.get("gpu_analyzed", False)
                 })
                 
                 # LIMPEZA AGGRESSIVA ENTRE CORTES
@@ -1477,6 +1666,10 @@ def handler(event):
         # 5. Resultado
         logger.info(f"[FINISHED] {len(results)} cortes gerados")
         
+        # Estatísticas GPU
+        gpu_encoded_count = sum(1 for r in results if r.get("gpu_encoded", False))
+        gpu_analyzed_count = sum(1 for r in results if r.get("gpu_analyzed", False))
+        
         return {
             "status": "success",
             "cuts": results,
@@ -1485,7 +1678,10 @@ def handler(event):
                 "total_cuts": len(results),
                 "successful_cuts": len([r for r in results if r.get("path")]),
                 "gpu_used": GPU_AVAILABLE,
-                "gpu_encoding": all(r.get("gpu_encoded", False) for r in results if r.get("gpu_encoded") is not None)
+                "gpu_forced": FORCE_GPU,
+                "gpu_encoding": gpu_encoded_count,
+                "gpu_analysis": gpu_analyzed_count,
+                "gpu_device": torch.cuda.get_device_name(0) if torch and torch.cuda.is_available() else None
             }
         }
         
@@ -1512,7 +1708,7 @@ if __name__ == "__main__":
     try:
         # Banner
         print("\n" + "="*60)
-        print("ANIMECUT SERVERLESS v12.0 - OTIMIZADO GPU 100%")
+        print("ANIMECUT SERVERLESS v12.0 - GPU FORÇADA 100%")
         print(f"Volume: {VOLUME_BASE}")
         print(f"Cache: {CACHE_DIR}")
         
@@ -1522,12 +1718,12 @@ if __name__ == "__main__":
         cuda_status = "YES" if GPU_AVAILABLE else "NO"
         audio_status = "DEEPFILTERNET" if DF_AVAILABLE else "FFMPEG"
         b2_status = "YES" if B2_AVAILABLE else "NO"
-        nvenc_status = "AVAILABLE" if GPU_AVAILABLE else "CPU ONLY"
+        force_gpu_status = "ACTIVE" if FORCE_GPU else "INACTIVE"
         
         print(f"MoviePy: {moviepy_status}")
         print(f"PyTorch: {pytorch_status}")
         print(f"CUDA: {cuda_status}")
-        print(f"NVENC: {nvenc_status}")
+        print(f"GPU Forced: {force_gpu_status}")
         print(f"Audio: {audio_status}")
         print(f"B2: {b2_status}")
         
@@ -1535,7 +1731,10 @@ if __name__ == "__main__":
             try:
                 gpu_name = torch.cuda.get_device_name(0)
                 gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
-                print(f"GPU: {gpu_name} ({gpu_mem:.1f} GB)")
+                cuda_ver = torch.version.cuda
+                print(f"GPU: {gpu_name}")
+                print(f"Memory: {gpu_mem:.1f} GB")
+                print(f"CUDA: {cuda_ver}")
             except:
                 pass
         
@@ -1573,4 +1772,4 @@ if __name__ == "__main__":
         print(f"ERRO: {e}")
         import traceback
         traceback.print_exc()
-        sys.exit(1)
+        sys.exit(1)             
