@@ -73,19 +73,19 @@ class DependencyManager:
                 
                 elapsed = time.time() - start_time
                 self.available_modules[module_name] = module
-                logger.info(f"✅ {module_name} carregado ({elapsed:.2f}s)")
+                logger.info(f"SUCCESS: {module_name} carregado ({elapsed:.2f}s)")
                 return module
                 
             except ImportError as e:
                 self.module_errors[name] = str(e)
-                logger.debug(f"⚠️ {name} não disponível: {e}")
+                logger.debug(f"WARNING: {name} não disponível: {e}")
                 continue
             except Exception as e:
                 self.module_errors[name] = str(e)
-                logger.debug(f"⚠️ Erro ao carregar {name}: {e}")
+                logger.debug(f"WARNING: Erro ao carregar {name}: {e}")
                 continue
         
-        logger.warning(f"❌ {module_name} não disponível após tentar {len(names_to_try)} nomes")
+        logger.warning(f"FAILED: {module_name} não disponível após tentar {len(names_to_try)} nomes")
         self.available_modules[module_name] = None
         return None
 
@@ -99,24 +99,26 @@ try:
     np = dep_manager.safe_import("numpy")
     if cv2 and np:
         CV2_AVAILABLE = True
-        logger.info("✅ OpenCV disponível")
+        logger.info("SUCCESS: OpenCV disponível")
         
         # Tenta carregar YOLO
         try:
             from ultralytics import YOLO
-            logger.info("✅ YOLO disponível")
+            logger.info("SUCCESS: YOLO disponível")
         except ImportError:
-            logger.warning("⚠️ YOLO não disponível")
+            logger.warning("WARNING: YOLO não disponível")
             
 except Exception as e:
-    logger.warning(f"⚠️ Visão computacional limitada: {e}")
+    logger.warning(f"WARNING: Visão computacional limitada: {e}")
 
 # 2. MoviePy v1.0.3
 MOVIEPY_AVAILABLE = False
+moviepy_version = "N/A"
 try:
     moviepy = dep_manager.safe_import("moviepy")
     if moviepy:
-        logger.info(f"🎞️ MoviePy versão: {moviepy.__version__}")
+        moviepy_version = getattr(moviepy, '__version__', 'N/A')
+        logger.info(f"MOVIEPY: versão: {moviepy_version}")
         
         # IMPORTS CORRETOS PARA MOVIEPY v1.0.3
         try:
@@ -126,17 +128,18 @@ try:
             )
             from moviepy.video.fx.all import mirror_x, gamma_corr, colorx
             MOVIEPY_AVAILABLE = True
-            logger.info("✅ MoviePy v1 configurado")
+            logger.info("SUCCESS: MoviePy v1 configurado")
         except ImportError as e:
-            logger.error(f"❌ Imports MoviePy falharam: {e}")
+            logger.error(f"ERROR: Imports MoviePy falharam: {e}")
             
 except Exception as e:
-    logger.error(f"❌ Erro no MoviePy: {e}")
+    logger.error(f"ERROR: Erro no MoviePy: {e}")
 
 # 3. IA (Transformers/Torch) - COM FALLBACK ROBUSTO
 AI_AVAILABLE = False
 GPU_AVAILABLE = False
 WHISPER_AVAILABLE = False
+WHISPER_TYPE = None
 
 # Primeiro tenta importar torch
 torch = dep_manager.safe_import("torch")
@@ -154,17 +157,17 @@ if torch:
                 from faster_whisper import WhisperModel
                 WHISPER_AVAILABLE = True
                 WHISPER_TYPE = "faster_whisper"
-                logger.info("✅ faster-whisper disponível")
+                logger.info("SUCCESS: faster-whisper disponível")
             except ImportError:
                 # Tenta openai-whisper como fallback
                 try:
                     import whisper
                     WHISPER_AVAILABLE = True
                     WHISPER_TYPE = "openai_whisper"
-                    logger.info("✅ openai-whisper disponível (fallback)")
+                    logger.info("SUCCESS: openai-whisper disponível (fallback)")
                 except ImportError:
                     WHISPER_AVAILABLE = False
-                    logger.warning("⚠️ Nenhuma biblioteca whisper disponível")
+                    logger.warning("WARNING: Nenhuma biblioteca whisper disponível")
             
             GPU_AVAILABLE = torch.cuda.is_available()
             DEVICE = "cuda" if GPU_AVAILABLE else "cpu"
@@ -173,14 +176,14 @@ if torch:
             if GPU_AVAILABLE:
                 gpu_name = torch.cuda.get_device_name(0)
                 gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
-                logger.info(f"✅ GPU: {gpu_name} ({gpu_mem:.1f} GB)")
+                logger.info(f"SUCCESS: GPU: {gpu_name} ({gpu_mem:.1f} GB)")
             else:
-                logger.warning("⚠️ Executando em CPU (GPU não detectada)")
+                logger.warning("WARNING: Executando em CPU (GPU não detectada)")
                 
     except Exception as e:
-        logger.warning(f"⚠️ Bibliotecas de IA falharam: {e}")
+        logger.warning(f"WARNING: Bibliotecas de IA falharam: {e}")
 else:
-    logger.warning("⚠️ PyTorch não disponível, IA desativada")
+    logger.warning("WARNING: PyTorch não disponível, IA desativada")
 
 # 4. Pillow (Imagens)
 PIL_AVAILABLE = False
@@ -189,9 +192,9 @@ try:
     if PIL:
         from PIL import Image, ImageDraw, ImageFont, ImageColor
         PIL_AVAILABLE = True
-        logger.info("✅ Pillow disponível")
+        logger.info("SUCCESS: Pillow disponível")
 except Exception as e:
-    logger.warning(f"⚠️ Pillow não disponível: {e}")
+    logger.warning(f"WARNING: Pillow não disponível: {e}")
 
 # 5. DeepFilterNet - COMPLETAMENTE ISOLADO
 DF_AVAILABLE = False
@@ -202,6 +205,7 @@ DF_ERROR = None
 try:
     import subprocess
     import importlib.util
+    import shutil
     
     # Verifica se existe algum comando CLI
     df_cli_commands = ["deepFilter", "df", "deepfilternet"]
@@ -211,13 +215,13 @@ try:
         cmd_path = shutil.which(cmd) if 'shutil' in sys.modules else None
         if cmd_path:
             df_cli_found = cmd_path
-            logger.info(f"🔍 DeepFilterNet CLI encontrado: {cmd}")
+            logger.info(f"DEEP FILTER: CLI encontrado: {cmd}")
             break
     
     if df_cli_found:
         DF_AVAILABLE = True
         DF_TYPE = "cli"
-        logger.info("✅ DeepFilterNet CLI disponível")
+        logger.info("SUCCESS: DeepFilterNet CLI disponível")
     else:
         # Tenta detectar módulo Python sem importar
         for module_name in ["df", "deepfilternet"]:
@@ -225,7 +229,7 @@ try:
             if spec is not None:
                 DF_AVAILABLE = True
                 DF_TYPE = f"python_{module_name}"
-                logger.info(f"✅ DeepFilterNet módulo detectado: {module_name}")
+                logger.info(f"SUCCESS: DeepFilterNet módulo detectado: {module_name}")
                 break
                 
 except Exception as e:
@@ -233,7 +237,7 @@ except Exception as e:
     logger.debug(f"DeepFilterNet detecção falhou: {e}")
 
 if not DF_AVAILABLE:
-    logger.info("ℹ️ DeepFilterNet não detectado, usando FFmpeg para áudio")
+    logger.info("INFO: DeepFilterNet não detectado, usando FFmpeg para áudio")
 
 # 6. Backblaze B2 (Upload) - COM FALLBACK SEGURO
 B2_AVAILABLE = False
@@ -257,12 +261,12 @@ try:
                 config=Config(signature_version="s3v4")
             )
             B2_AVAILABLE = True
-            logger.info(f"✅ Backblaze B2 configurado: {B2_BUCKET}")
+            logger.info(f"SUCCESS: Backblaze B2 configurado: {B2_BUCKET}")
         else:
-            logger.warning("⚠️ Credenciais B2 incompletas")
+            logger.warning("WARNING: Credenciais B2 incompletas")
             
 except Exception as e:
-    logger.warning(f"⚠️ Backblaze B2 não configurado: {e}")
+    logger.warning(f"WARNING: Backblaze B2 não configurado: {e}")
 
 # 7. Outras dependências opcionais
 optional_deps = {
@@ -275,7 +279,7 @@ optional_deps = {
 for display_name, module_name in optional_deps.items():
     try:
         __import__(module_name)
-        logger.info(f"✅ {display_name} disponível")
+        logger.info(f"SUCCESS: {display_name} disponível")
     except ImportError:
         logger.debug(f"{display_name} não disponível (opcional)")
 
@@ -321,7 +325,7 @@ class NetworkManager:
         
         for attempt in range(self.max_retries):
             try:
-                logger.info(f"📥 Tentativa {attempt + 1}/{self.max_retries}: {url[:80]}...")
+                logger.info(f"DOWNLOAD: Tentativa {attempt + 1}/{self.max_retries}: {url[:80]}...")
                 
                 response = session.get(
                     url, 
@@ -345,13 +349,13 @@ class NetworkManager:
                                 logger.debug(f"  Progresso: {percent:.1f}%")
                 
                 file_size = os.path.getsize(output_path) / 1e6
-                logger.info(f"✅ Download completo: {output_path.name} ({file_size:.1f} MB)")
+                logger.info(f"SUCCESS: Download completo: {output_path.name} ({file_size:.1f} MB)")
                 return True
                 
             except requests.exceptions.RequestException as e:
-                logger.warning(f"⚠️ Tentativa {attempt + 1} falhou: {e}")
+                logger.warning(f"WARNING: Tentativa {attempt + 1} falhou: {e}")
                 if attempt == self.max_retries - 1:
-                    logger.error(f"❌ Todas as tentativas falharam para: {url}")
+                    logger.error(f"ERROR: Todas as tentativas falharam para: {url}")
                     return False
                 time.sleep(2 ** attempt)  # Backoff exponencial
                 
@@ -386,11 +390,11 @@ def setup_fonts():
     
     for font_path, font_url in font_sources:
         if font_path.exists():
-            logger.info(f"✅ Fonte encontrada: {font_path}")
+            logger.info(f"SUCCESS: Fonte encontrada: {font_path}")
             return str(font_path)
     
     # Se nenhuma fonte encontrada, tenta baixar com fallback
-    logger.warning("⚠️ Nenhuma fonte encontrada, usando padrão do sistema")
+    logger.warning("WARNING: Nenhuma fonte encontrada, usando padrão do sistema")
     return None
 
 # Configura fontes
@@ -403,7 +407,7 @@ def clean_audio_ffmpeg(input_path: Path, quality="high") -> Path:
     Limpeza de áudio usando FFmpeg (sempre funciona)
     Qualidade: 'high', 'medium', 'fast'
     """
-    logger.info(f"🔊 Processando áudio ({quality}): {input_path.name}")
+    logger.info(f"AUDIO: Processando áudio ({quality}): {input_path.name}")
     
     original_path = Path(input_path)
     output_dir = original_path.parent
@@ -456,15 +460,15 @@ def clean_audio_ffmpeg(input_path: Path, quality="high") -> Path:
         
         if result.returncode == 0 and output_file.exists() and output_file.stat().st_size > 0:
             file_size = output_file.stat().st_size / 1e6
-            logger.info(f"✅ Áudio processado ({quality}): {file_size:.1f} MB")
+            logger.info(f"SUCCESS: Áudio processado ({quality}): {file_size:.1f} MB")
             return output_file
         else:
-            logger.warning(f"⚠️ FFmpeg falhou: {result.stderr[:200]}")
+            logger.warning(f"WARNING: FFmpeg falhou: {result.stderr[:200]}")
             
     except subprocess.TimeoutExpired:
-        logger.error("❌ FFmpeg timeout")
+        logger.error("ERROR: FFmpeg timeout")
     except Exception as e:
-        logger.error(f"❌ Erro FFmpeg: {e}")
+        logger.error(f"ERROR: Erro FFmpeg: {e}")
     
     return original_path
 
@@ -472,7 +476,7 @@ def clean_audio_deepfilter(input_path: Path) -> Path:
     """
     Tenta DeepFilterNet, fallback para FFmpeg
     """
-    logger.info(f"🧹 Processando áudio: {input_path.name}")
+    logger.info(f"AUDIO CLEAN: Processando áudio: {input_path.name}")
     
     # Se DeepFilterNet disponível via CLI
     if DF_AVAILABLE and DF_TYPE == "cli":
@@ -481,7 +485,7 @@ def clean_audio_deepfilter(input_path: Path) -> Path:
             for cmd_name in ["deepFilter", "df", "deepfilternet"]:
                 cmd_path = shutil.which(cmd_name)
                 if cmd_path:
-                    logger.info(f"🔧 Tentando {cmd_name}...")
+                    logger.info(f"DEEP FILTER: Tentando {cmd_name}...")
                     
                     output_dir = input_path.parent
                     cmd = [cmd_path, str(input_path), "-o", str(output_dir)]
@@ -504,11 +508,11 @@ def clean_audio_deepfilter(input_path: Path) -> Path:
                         for pattern in patterns:
                             output_file = output_dir / pattern
                             if output_file.exists():
-                                logger.info(f"✅ Áudio processado via DeepFilterNet")
+                                logger.info(f"SUCCESS: Áudio processado via DeepFilterNet")
                                 return output_file
     
         except Exception as e:
-            logger.warning(f"⚠️ DeepFilterNet CLI falhou: {e}")
+            logger.warning(f"WARNING: DeepFilterNet CLI falhou: {e}")
     
     # Fallback para FFmpeg de alta qualidade
     return clean_audio_ffmpeg(input_path, quality="high")
@@ -526,19 +530,19 @@ def download_video(url: str) -> str:
     # Verifica se já existe no cache
     cache_file = CACHE_DIR / "videos" / f"{url_hash}.mp4"
     if cache_file.exists():
-        logger.info(f"📂 Usando cache: {cache_file.name}")
+        logger.info(f"CACHE: Usando cache: {cache_file.name}")
         # Copia para temp
         shutil.copy2(cache_file, temp_file)
         return str(temp_file)
     
-    logger.info(f"📥 Baixando vídeo: {url[:80]}...")
+    logger.info(f"DOWNLOAD: Baixando vídeo: {url[:80]}...")
     
     # Tenta download
     if network.download_with_retry(url, temp_file):
         # Salva no cache
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(temp_file, cache_file)
-        logger.info(f"💾 Salvo no cache: {cache_file.name}")
+        logger.info(f"CACHE: Salvo no cache: {cache_file.name}")
         return str(temp_file)
     else:
         raise Exception(f"Falha ao baixar vídeo: {url}")
@@ -556,14 +560,14 @@ def download_background(url: str) -> Optional[str]:
         
         # Verifica cache
         if cache_file.exists():
-            logger.info(f"📂 Background do cache: {cache_file.name}")
+            logger.info(f"CACHE: Background do cache: {cache_file.name}")
             # Copia para temp
             temp_file = TEMP_DIR / f"bg_{url_hash}.png"
             shutil.copy2(cache_file, temp_file)
             return str(temp_file)
         
         # Download
-        logger.info(f"🖼️ Baixando background: {url[:80]}...")
+        logger.info(f"BACKGROUND: Baixando background: {url[:80]}...")
         temp_file = TEMP_DIR / f"bg_{url_hash}.png"
         
         if network.download_with_retry(url, temp_file):
@@ -573,7 +577,7 @@ def download_background(url: str) -> Optional[str]:
             return str(temp_file)
             
     except Exception as e:
-        logger.warning(f"⚠️ Erro ao baixar background: {e}")
+        logger.warning(f"WARNING: Erro ao baixar background: {e}")
     
     return None
 
@@ -593,14 +597,14 @@ class ActionDetector:
         try:
             cap = cv2.VideoCapture(self.video_path)
             if not cap.isOpened():
-                logger.warning("⚠️ Não foi possível abrir o vídeo")
+                logger.warning("WARNING: Não foi possível abrir o vídeo")
                 return []
             
             fps = cap.get(cv2.CAP_PROP_FPS)
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             
             if fps <= 0 or total_frames <= 0:
-                logger.warning("⚠️ Propriedades do vídeo inválidas")
+                logger.warning("WARNING: Propriedades do vídeo inválidas")
                 cap.release()
                 return []
             
@@ -609,7 +613,7 @@ class ActionDetector:
             step = max(1, int(fps * sample_rate))
             step = min(step, total_frames // 100)  # Limita para não processar muitos frames
             
-            logger.info(f"⚡ Analisando vídeo: {total_frames} frames (step={step})")
+            logger.info(f"ACTION DETECTION: Analisando vídeo: {total_frames} frames (step={step})")
             
             frame_count = 0
             for frame_idx in range(0, total_frames, step):
@@ -655,16 +659,16 @@ class ActionDetector:
                     for item in energy_scores:
                         item["score"] = (item["score"] / max_score) * 100
             
-            logger.info(f"✅ Análise concluída: {len(energy_scores)} pontos")
+            logger.info(f"SUCCESS: Análise concluída: {len(energy_scores)} pontos")
             return energy_scores
             
         except Exception as e:
-            logger.error(f"❌ Erro no sensor de adrenalina: {e}")
+            logger.error(f"ERROR: Erro no sensor de adrenalina: {e}")
             return []
     
     def detect_high_energy_segments(self, threshold: float = 70.0) -> List[Dict]:
         """Identifica segmentos de alta energia (ação)"""
-        logger.info(f"⚡ Buscando cenas de ação (threshold={threshold})")
+        logger.info(f"ACTION DETECTION: Buscando cenas de ação (threshold={threshold})")
         
         visual_data = self.calculate_visual_energy()
         if not visual_data:
@@ -703,7 +707,7 @@ class ActionDetector:
             current_segment["score"] = current_segment["peak_score"]
             action_segments.append(current_segment)
         
-        logger.info(f"✅ {len(action_segments)} cenas de ação detectadas")
+        logger.info(f"SUCCESS: {len(action_segments)} cenas de ação detectadas")
         return action_segments
 
 # ==================== ANTI-SHADOWBAN ====================
@@ -713,7 +717,7 @@ def apply_antishadowban(clip):
     if not MOVIEPY_AVAILABLE:
         return clip
     
-    logger.info("🛡️ Aplicando Anti-Shadowban...")
+    logger.info("ANTI-SHADOWBAN: Aplicando...")
     
     try:
         # Espelhamento aleatório
@@ -730,7 +734,7 @@ def apply_antishadowban(clip):
         logger.debug(f"  → Ajustes: gamma={gamma_val:.2f}, contraste={contrast_val:.2f}")
         
     except Exception as e:
-        logger.warning(f"⚠️ Anti-shadowban parcialmente aplicado: {e}")
+        logger.warning(f"WARNING: Anti-shadowban parcialmente aplicado: {e}")
     
     return clip
 
@@ -836,7 +840,7 @@ def criar_titulo_simples(
         return clip
         
     except Exception as e:
-        logger.warning(f"⚠️ Erro ao criar título: {e}")
+        logger.warning(f"WARNING: Erro ao criar título: {e}")
         return None
 
 # ==================== ANÁLISE DE VÍDEO COM IA ====================
@@ -888,17 +892,17 @@ def load_turbo_whisper():
                     return {"chunks": chunks}
             
             whisper_pipeline = WhisperWrapper(whisper_model)
-            logger.info("✅ Whisper carregado")
+            logger.info("SUCCESS: Whisper carregado")
             
     except Exception as e:
-        logger.error(f"❌ Erro ao carregar Whisper: {e}")
+        logger.error(f"ERROR: Erro ao carregar Whisper: {e}")
         whisper_pipeline = None
 
 def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
     """Analisa vídeo para encontrar cenas virais"""
     
     if not AI_AVAILABLE or not WHISPER_AVAILABLE:
-        logger.warning("⚠️ IA não disponível, usando heurística")
+        logger.warning("WARNING: IA não disponível, usando heurística")
         return generate_fallback_cuts(video_path, anime_name)
     
     try:
@@ -909,7 +913,7 @@ def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
         if not whisper_pipeline:
             raise Exception("Whisper não disponível")
         
-        logger.info("🔊 Extraindo áudio...")
+        logger.info("AUDIO: Extraindo áudio...")
         
         # Extrai áudio
         raw_audio = TEMP_DIR / f"audio_{uuid.uuid4().hex[:8]}.wav"
@@ -927,7 +931,7 @@ def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
         clean_audio = clean_audio_deepfilter(raw_audio)
         
         # Transcrição
-        logger.info("🎤 Transcrevendo...")
+        logger.info("TRANSCRIPTION: Transcrevendo...")
         result = whisper_pipeline(str(clean_audio))
         
         # Processa transcrição
@@ -944,7 +948,7 @@ def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
                 })
         
         # Detecção de ação
-        logger.info("⚡ Buscando cenas de ação...")
+        logger.info("ACTION ANALYSIS: Buscando cenas de ação...")
         detector = ActionDetector(video_path)
         action_scenes = detector.detect_high_energy_segments()
         
@@ -1022,11 +1026,11 @@ def analyze_video_content(video_path: str, anime_name: str) -> List[Dict]:
                         "score": 65
                     })
         
-        logger.info(f"📊 {len(cuts)} cortes identificados")
+        logger.info(f"ANALYSIS: {len(cuts)} cortes identificados")
         return cuts
         
     except Exception as e:
-        logger.error(f"❌ Erro na análise: {e}")
+        logger.error(f"ERROR: Erro na análise: {e}")
         return generate_fallback_cuts(video_path, anime_name)
 
 def generate_fallback_cuts(video_path: str, anime_name: str) -> List[Dict]:
@@ -1073,7 +1077,7 @@ def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> 
         end = cut_data.get('end', start + 60)
         title = cut_data.get('title', config.get('animeName', 'Anime'))
         
-        logger.info(f"🎬 Corte {num}: {title} ({start:.1f}s - {end:.1f}s)")
+        logger.info(f"CUT {num}: {title} ({start:.1f}s - {end:.1f}s)")
         
         # Carrega vídeo
         video = VideoFileClip(video_path)
@@ -1098,7 +1102,7 @@ def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> 
                 bg_img = bg_img.resize((target_w, target_h))
                 bg_clip = ImageClip(np.array(bg_img)).set_duration(clip.duration)
             except Exception as e:
-                logger.warning(f"⚠️ Background falhou: {e}")
+                logger.warning(f"WARNING: Background falhou: {e}")
         
         if bg_clip is None:
             # Background sólido
@@ -1165,7 +1169,7 @@ def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> 
             ffmpeg_params.extend(['-crf', '23'])
         
         # Renderiza
-        logger.info(f"⚙️ Renderizando {output_filename}...")
+        logger.info(f"RENDERING: Renderizando {output_filename}...")
         final.write_videofile(
             str(output_path),
             codec=codec,
@@ -1182,12 +1186,12 @@ def processar_corte(video_path: str, cut_data: Dict, num: int, config: Dict) -> 
         video.close()
         
         file_size = output_path.stat().st_size / 1e6
-        logger.info(f"✅ Corte {num} finalizado ({file_size:.1f} MB)")
+        logger.info(f"SUCCESS: Corte {num} finalizado ({file_size:.1f} MB)")
         
         return str(output_path)
         
     except Exception as e:
-        logger.error(f"❌ Erro no corte {num}: {e}")
+        logger.error(f"ERROR: Erro no corte {num}: {e}")
         raise
 
 # ==================== HANDLER PRINCIPAL ====================
@@ -1201,7 +1205,7 @@ def handler(event):
         torch.cuda.empty_cache()
     
     logger.info("=" * 60)
-    logger.info("🚀 ANIMECUT - NOVA REQUISIÇÃO")
+    logger.info("ANIMECUT - NOVA REQUISIÇÃO")
     logger.info("=" * 60)
     
     input_data = event.get("input", {})
@@ -1213,7 +1217,7 @@ def handler(event):
             "system": {
                 "gpu": GPU_AVAILABLE,
                 "moviepy": MOVIEPY_AVAILABLE,
-                "moviepy_version": moviepy.__version__ if MOVIEPY_AVAILABLE else "N/A",
+                "moviepy_version": moviepy_version,
                 "ai": AI_AVAILABLE,
                 "whisper": WHISPER_AVAILABLE,
                 "deepfilter": DF_AVAILABLE,
@@ -1231,10 +1235,10 @@ def handler(event):
         
         anime_name = input_data.get("animeName", "Anime")
         
-        logger.info(f"🎬 Processando: {anime_name}")
+        logger.info(f"PROCESSING: Processando: {anime_name}")
         
         # 1. Download
-        logger.info("📥 Baixando vídeo...")
+        logger.info("DOWNLOAD: Baixando vídeo...")
         video_path = download_video(video_url)
         
         # Background (opcional)
@@ -1254,15 +1258,15 @@ def handler(event):
         cut_type = input_data.get("cutType", "auto")
         
         if cut_type == "auto" and AI_AVAILABLE:
-            logger.info("🤖 Modo automático (IA)")
+            logger.info("MODE: Modo automático (IA)")
             cuts = analyze_video_content(video_path, anime_name)
         elif cut_type == "manual":
             manual_cuts = input_data.get("cuts", [])
             if manual_cuts:
                 cuts = manual_cuts
-                logger.info(f"✂️ {len(cuts)} cortes manuais")
+                logger.info(f"MODE: {len(cuts)} cortes manuais")
             else:
-                logger.warning("⚠️ Sem cortes manuais, usando automático")
+                logger.warning("WARNING: Sem cortes manuais, usando automático")
                 cuts = analyze_video_content(video_path, anime_name)
         else:
             cuts = analyze_video_content(video_path, anime_name)
@@ -1278,13 +1282,13 @@ def handler(event):
                 "score": 50
             }]
         
-        logger.info(f"✂️ {len(cuts)} cortes para processar")
+        logger.info(f"CUTS: {len(cuts)} cortes para processar")
         
         # 3. Processamento
         results = []
         for i, cut in enumerate(cuts):
             try:
-                logger.info(f"🔄 Processando corte {i+1}...")
+                logger.info(f"PROCESSING: Processando corte {i+1}...")
                 
                 out_path = processar_corte(video_path, cut, i+1, config)
                 
@@ -1305,9 +1309,9 @@ def handler(event):
                             Params={'Bucket': B2_BUCKET, 'Key': key},
                             ExpiresIn=86400
                         )
-                        logger.info(f"📤 Upload concluído")
+                        logger.info(f"UPLOAD: Upload concluído")
                     except Exception as e:
-                        logger.warning(f"⚠️ Upload falhou: {e}")
+                        logger.warning(f"WARNING: Upload falhou: {e}")
                 
                 results.append({
                     "id": i+1,
@@ -1324,14 +1328,14 @@ def handler(event):
                 if torch and torch.cuda.is_available():
                     torch.cuda.empty_cache()
                 
-                logger.info(f"✅ Corte {i+1} concluído")
+                logger.info(f"SUCCESS: Corte {i+1} concluído")
                 
             except Exception as e:
-                logger.error(f"❌ Erro no corte {i+1}: {e}")
+                logger.error(f"ERROR: Erro no corte {i+1}: {e}")
                 continue
         
         # 4. Limpeza
-        logger.info("🧹 Limpando...")
+        logger.info("CLEANUP: Limpando...")
         
         try:
             os.remove(video_path)
@@ -1353,7 +1357,7 @@ def handler(event):
                 pass
         
         # 5. Resultado
-        logger.info(f"🎉 {len(results)} cortes gerados")
+        logger.info(f"FINISHED: {len(results)} cortes gerados")
         
         return {
             "status": "success",
@@ -1366,7 +1370,7 @@ def handler(event):
         }
         
     except Exception as e:
-        logger.error(f"❌ Erro: {e}")
+        logger.error(f"ERROR: Erro: {e}")
         import traceback
         return {
             "status": "error",
@@ -1379,7 +1383,7 @@ def safe_handler(event):
     try:
         return handler(event)
     except Exception as e:
-        logger.error(f"❌ ERRO GLOBAL: {e}")
+        logger.error(f"ERROR: ERRO GLOBAL: {e}")
         return {"status": "error", "error": str(e)}
 
 # ==================== INICIALIZAÇÃO ====================
@@ -1388,31 +1392,51 @@ if __name__ == "__main__":
     try:
         # Banner
         print("\n" + "="*60)
-        print("🎬 ANIMECUT SERVERLESS v12.0 - OTIMIZADO")
-        print(f"📁 Volume: {VOLUME_BASE}")
-        print(f"💾 Cache: {CACHE_DIR}")
+        print("ANIMECUT SERVERLESS v12.0 - OTIMIZADO")
+        print(f"Volume: {VOLUME_BASE}")
+        print(f"Cache: {CACHE_DIR}")
         
         # Status
-        print(f"🎞️ MoviePy: {'✅' if MOVIEPY_AVAILABLE else '❌'}")
-        print(f"🔥 PyTorch: {'✅' if AI_AVAILABLE else '❌'}")
-        print(f"⚡ CUDA: {'✅' if GPU_AVAILABLE else '❌'}")
-        print(f"🔊 Áudio: {'✅ DeepFilterNet' if DF_AVAILABLE else '✅ FFmpeg'}")
-        print(f"☁️  B2: {'✅' if B2_AVAILABLE else '❌'}")
+        moviepy_status = "YES" if MOVIEPY_AVAILABLE else "NO"
+        pytorch_status = "YES" if AI_AVAILABLE else "NO"
+        cuda_status = "YES" if GPU_AVAILABLE else "NO"
+        audio_status = "DEEPFILTERNET" if DF_AVAILABLE else "FFMPEG"
+        b2_status = "YES" if B2_AVAILABLE else "NO"
+        
+        print(f"MoviePy: {moviepy_status}")
+        print(f"PyTorch: {pytorch_status}")
+        print(f"CUDA: {cuda_status}")
+        print(f"Audio: {audio_status}")
+        print(f"B2: {b2_status}")
         print("="*60 + "\n")
         
         sys.stdout.flush()
         
         # Importa runpod
-        import runpod
-        
-        # Inicia servidor
-        runpod.serverless.start({"handler": safe_handler})
-        
+        try:
+            import runpod
+            
+            # Inicia servidor
+            runpod.serverless.start({"handler": safe_handler})
+            
+        except ImportError:
+            print("WARNING: RunPod não disponível, executando em modo local")
+            print("Para usar no RunPod, instale: pip install runpod")
+            
+            # Modo local de teste
+            test_event = {
+                "input": {
+                    "mode": "test"
+                }
+            }
+            result = safe_handler(test_event)
+            print(f"\nTeste local: {result}")
+            
     except KeyboardInterrupt:
-        print("\n👋 Servidor interrompido")
+        print("\nServidor interrompido")
         sys.exit(0)
     except Exception as e:
-        print(f"💥 ERRO: {e}")
+        print(f"ERRO: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
