@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AnimeCut Serverless v12.6 B2 + FONTS + TITLES FIX - TODOS OS BUGS CORRIGIDOS
+AnimeCut Serverless v12.7 B2 + FONTS + TITLES FIX - TODOS OS BUGS CORRIGIDOS
 Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1
 CORREÇÕES: GPU estável, memória otimizada, cleanup robusto, fallbacks seguros
-""" 
+"""
 
 # ==================== IMPORTAÇÕES ESSENCIAIS ====================
 import os
@@ -519,10 +519,10 @@ try:
     if boto3:
         from botocore.client import Config
         
-        B2_KEY_ID = os.environ.get("B2_KEY_ID", "00568702c2cbfc60000000001")
+        B2_KEY_ID = os.environ.get("B2_KEY_ID", "00568702c2cbfc60000000002")
         B2_APP_KEY = os.environ.get("B2_APPLICATION_KEY", "K005aP6cXPuBIw6IakBaMHYtXx4VGq")
         B2_ENDPOINT = os.environ.get("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
-        B2_BUCKET = os.environ.get("B2_BUCKET_NAME", "KortexAI2")
+        B2_BUCKET = os.environ.get("B2_BUCKET_NAME", "KortexClipAI2")
         
         if B2_KEY_ID and B2_APP_KEY and B2_BUCKET:
             try:
@@ -652,7 +652,7 @@ network = NetworkManager(max_retries=3, timeout=60)
 def setup_fonts():
     """Configura fontes usando cache local com fallbacks
     
-    v12.6: Suporte para fontes personalizadas em /workspace/fonts
+    v12.7: Suporte para fontes personalizadas em /workspace/fonts
     """
     
     # Fontes personalizadas do usuário têm prioridade (Volume persistente)
@@ -985,52 +985,113 @@ def download_video(url: str) -> str:
     else:
         raise Exception(f"Falha ao baixar vídeo: {url}")
 
-@retry_on_failure(max_attempts=2, delay=2)
+@retry_on_failure(max_attempts=3, delay=2)
 def download_background(url: str) -> Optional[str]:
-    """Download de background com cache e validação"""
-    if not url or url.lower() == "none":
+    """Download de background com cache e validação
+    
+    v12.7: Suporte melhorado para URLs do Replit/Google Storage
+    """
+    if not url or url.lower() == "none" or url.lower() == "null":
+        logger.info("[BACKGROUND] Nenhuma URL fornecida")
         return None
     
+    # Limpa a URL
+    url = url.strip()
+    
     if not network.validate_url(url):
-        logger.warning(f"[WARNING] URL de background inválida: {url}")
+        logger.warning(f"[BACKGROUND] URL inválida: {url}")
         return None
     
     try:
+        logger.info(f"[BACKGROUND] Processando URL: {url[:100]}...")
+        
         # Hash da URL para cache
         url_hash = hashlib.md5(url.encode()).hexdigest()[:16]
-        cache_file = CACHE_DIR / "backgrounds" / f"{url_hash}.png"
+        
+        # Detecta extensão da URL ou usa .png como padrão
+        ext = ".png"
+        url_lower = url.lower()
+        if ".jpg" in url_lower or ".jpeg" in url_lower:
+            ext = ".jpg"
+        elif ".webp" in url_lower:
+            ext = ".webp"
+        elif ".gif" in url_lower:
+            ext = ".gif"
+        
+        cache_file = CACHE_DIR / "backgrounds" / f"{url_hash}{ext}"
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         
         # Verifica cache
-        if cache_file.exists() and cache_file.stat().st_size > 0:
-            logger.info(f"[CACHE] Background do cache: {cache_file.name}")
-            # Copia para temp
-            temp_file = TEMP_DIR / f"bg_{url_hash}_{uuid.uuid4().hex[:6]}.png"
+        if cache_file.exists() and cache_file.stat().st_size > 1000:
+            logger.info(f"[BACKGROUND] Usando cache: {cache_file.name}")
+            temp_file = TEMP_DIR / f"bg_{url_hash}_{uuid.uuid4().hex[:6]}{ext}"
             shutil.copy2(cache_file, temp_file)
             resource_manager.register(temp_file, lambda p: p.unlink(missing_ok=True))
             return str(temp_file)
         
-        # Download
-        logger.info(f"[BACKGROUND] Baixando: {url[:80]}...")
-        temp_file = TEMP_DIR / f"bg_{url_hash}_{uuid.uuid4().hex[:6]}.png"
+        # Download com headers para evitar bloqueios
+        logger.info(f"[BACKGROUND] Baixando de: {url[:80]}...")
+        temp_file = TEMP_DIR / f"bg_{url_hash}_{uuid.uuid4().hex[:6]}{ext}"
         
-        if network.download_with_retry(url, temp_file):
-            # Valida se é imagem
-            if not temp_file.exists() or temp_file.stat().st_size < 1000:
-                raise Exception("Arquivo de background muito pequeno")
+        # Headers especiais para Replit/Google Storage
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'image/*,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': url.split('/')[0] + '//' + url.split('/')[2] + '/' if len(url.split('/')) > 2 else ''
+        }
+        
+        try:
+            if network.download_with_retry(url, temp_file, headers=headers):
+                # Valida se é imagem
+                if not temp_file.exists():
+                    raise Exception("Arquivo não foi criado")
+                
+                file_size = temp_file.stat().st_size
+                if file_size < 1000:
+                    raise Exception(f"Arquivo muito pequeno: {file_size} bytes")
+                
+                logger.info(f"[BACKGROUND] Download OK: {file_size/1024:.1f} KB")
+                
+                # Salva no cache
+                try:
+                    shutil.copy2(temp_file, cache_file)
+                    logger.info(f"[BACKGROUND] Salvo no cache: {cache_file.name}")
+                except Exception as e:
+                    logger.warning(f"[BACKGROUND] Erro ao cachear: {e}")
+                
+                resource_manager.register(temp_file, lambda p: p.unlink(missing_ok=True))
+                return str(temp_file)
+                
+        except Exception as download_error:
+            logger.warning(f"[BACKGROUND] Erro no download: {download_error}")
             
-            # Salva no cache
+            # Tenta download alternativo com requests direto
             try:
-                shutil.copy2(temp_file, cache_file)
-            except Exception as e:
-                logger.warning(f"[WARNING] Erro ao salvar background no cache: {e}")
-            
-            resource_manager.register(temp_file, lambda p: p.unlink(missing_ok=True))
-            return str(temp_file)
+                import requests
+                logger.info("[BACKGROUND] Tentando download alternativo...")
+                
+                response = requests.get(url, headers=headers, timeout=30, stream=True)
+                response.raise_for_status()
+                
+                with open(temp_file, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                
+                if temp_file.exists() and temp_file.stat().st_size > 1000:
+                    logger.info(f"[BACKGROUND] Download alternativo OK: {temp_file.stat().st_size/1024:.1f} KB")
+                    resource_manager.register(temp_file, lambda p: p.unlink(missing_ok=True))
+                    return str(temp_file)
+                    
+            except Exception as alt_error:
+                logger.warning(f"[BACKGROUND] Download alternativo falhou: {alt_error}")
             
     except Exception as e:
-        logger.warning(f"[WARNING] Erro ao baixar background: {e}")
+        logger.error(f"[BACKGROUND] Erro geral: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
     
+    logger.warning("[BACKGROUND] Todas as tentativas falharam")
     return None
 
 # ==================== SENSOR DE ADRENALINA OTIMIZADO ====================
@@ -2089,7 +2150,7 @@ def handler(event):
     
     # LOG DE INICIALIZAÇÃO
     logger.info("=" * 70)
-    logger.info(f"ANIMECUT v12.6 - NOVA REQUISIÇÃO [ID: {request_id}]")
+    logger.info(f"ANIMECUT v12.7 - NOVA REQUISIÇÃO [ID: {request_id}]")
     logger.info("=" * 70)
     
     # LOG DE STATUS DO SISTEMA
@@ -2384,7 +2445,7 @@ if __name__ == "__main__":
     try:
         # Banner
         print("\n" + "="*70)
-        print("ANIMECUT SERVERLESS v12.6 - B2 + FONTS + TITLES FIX")
+        print("ANIMECUT SERVERLESS v12.7 - B2 + BACKGROUND FIX")
         print("Todas as correções aplicadas:")
         print("  ✓ Gestão de memória GPU otimizada")
         print("  ✓ Cleanup robusto de recursos")
