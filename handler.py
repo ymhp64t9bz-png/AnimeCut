@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AnimeCut Serverless v12.7 B2 + FONTS + TITLES FIX - TODOS OS BUGS CORRIGIDOS
+AnimeCut Serverless v12.7.2 FORCE REBUILD - B2 BUCKET FIX
+BUILD: 2025-12-15 15:45 - FORCE NO CACHE
 Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1
-CORREÇÕES: GPU estável, memória otimizada, cleanup robusto, fallbacks seguros
+CORREÇÕES: Bucket B2 KortexClipAI2, Background download, Fontes Volume
 """
 
 # ==================== IMPORTAÇÕES ESSENCIAIS ====================
@@ -2150,7 +2151,7 @@ def handler(event):
     
     # LOG DE INICIALIZAÇÃO
     logger.info("=" * 70)
-    logger.info(f"ANIMECUT v12.7 - NOVA REQUISIÇÃO [ID: {request_id}]")
+    logger.info(f"ANIMECUT v12.7.2 - NOVA REQUISIÇÃO [ID: {request_id}]")
     logger.info("=" * 70)
     
     # LOG DE STATUS DO SISTEMA
@@ -2446,10 +2447,11 @@ if __name__ == "__main__":
         # Banner com versão detalhada
         print("\n" + "="*70)
         print("╔═══════════════════════════════════════════════════════════════════╗")
-        print("║     ANIMECUT SERVERLESS v12.7.1 - BUILD 2025-12-15 12:30         ║")
+        print("║   ANIMECUT SERVERLESS v12.7.2 - BUILD 2025-12-15 15:45 FORCE     ║")
         print("╚═══════════════════════════════════════════════════════════════════╝")
-        print("Correções aplicadas:")
-        print("  ✓ Bucket B2: KortexClipAI2")
+        print("Correções v12.7.2:")
+        print("  ✓ Bucket B2: KortexClipAI2 (CORRIGIDO)")
+        print("  ✓ KeyID B2: 00568702c2cbfc60000000002")
         print("  ✓ Download de background melhorado")
         print("  ✓ Fontes do volume /workspace/fonts")
         print("  ✓ Títulos com logs detalhados")
