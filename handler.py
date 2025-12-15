@@ -4,7 +4,7 @@
 AnimeCut Serverless v12.6 B2 + FONTS + TITLES FIX - TODOS OS BUGS CORRIGIDOS
 Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1
 CORREÇÕES: GPU estável, memória otimizada, cleanup robusto, fallbacks seguros
-"""
+""" 
 
 # ==================== IMPORTAÇÕES ESSENCIAIS ====================
 import os
