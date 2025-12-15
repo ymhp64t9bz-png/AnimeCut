@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AnimeCut Serverless v12.5 ENCODING DEFINITIVO - TODOS OS BUGS CORRIGIDOS
+AnimeCut Serverless v12.6 B2 + FONTS + TITLES FIX - TODOS OS BUGS CORRIGIDOS
 Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1
 CORREÇÕES: GPU estável, memória otimizada, cleanup robusto, fallbacks seguros
 """
@@ -650,19 +650,48 @@ network = NetworkManager(max_retries=3, timeout=60)
 # ==================== FONTE COM CACHE ====================
 
 def setup_fonts():
-    """Configura fontes usando cache local com fallbacks"""
+    """Configura fontes usando cache local com fallbacks
+    
+    v12.6: Suporte para fontes personalizadas em /workspace/fonts
+    """
+    
+    # Fontes personalizadas do usuário têm prioridade (Volume persistente)
+    custom_fonts = []
+    if FONTS_DIR.exists():
+        # Procura qualquer fonte .ttf ou .otf no diretório de fontes
+        for ext in ['*.ttf', '*.TTF', '*.otf', '*.OTF']:
+            custom_fonts.extend(FONTS_DIR.glob(ext))
+        
+        # Ordena por preferência (Impact, Roboto, Arial primeiro)
+        preferred = ['impact', 'roboto', 'arial', 'helvetica', 'opensans', 'montserrat']
+        def font_priority(f):
+            name = f.stem.lower()
+            for i, pref in enumerate(preferred):
+                if pref in name:
+                    return i
+            return 100
+        custom_fonts.sort(key=font_priority)
+        
+        if custom_fonts:
+            logger.info(f"[FONTS] {len(custom_fonts)} fontes encontradas em {FONTS_DIR}")
     
     font_sources = [
+        *custom_fonts,  # Fontes do usuário primeiro
         CACHE_DIR / "fonts" / "Impact.ttf",
         FONT_PATH,
         FONTS_DIR / "Roboto-Bold.ttf",
         FONTS_DIR / "Arial.ttf",
+        FONTS_DIR / "impact.ttf",
+        FONTS_DIR / "Impact.ttf",
+        # Fontes do sistema
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
     ]
     
     for font_path in font_sources:
         try:
-            p = Path(font_path)
+            p = Path(font_path) if not isinstance(font_path, Path) else font_path
         except Exception:
             p = Path(str(font_path))
 
@@ -670,7 +699,7 @@ def setup_fonts():
             logger.info(f"[SUCCESS] Fonte encontrada: {p}")
             return str(p)
     
-    logger.info("[INFO] Nenhuma fonte TrueType encontrada, usando padrão do sistema")
+    logger.warning("[WARNING] Nenhuma fonte TrueType encontrada, títulos podem não aparecer corretamente")
     return None
 
 FONT_TO_USE = setup_fonts()
@@ -1349,7 +1378,7 @@ def criar_titulo_simples(
         pos_y = max(0, min(altura_video - img_h, int(altura_video * pos_vertical)))
         clip = clip.set_position(('center', pos_y))
         
-        logger.debug(f"[TITULO] Criado com sucesso: {len(linhas)} linhas")
+        logger.info(f"[TITULO] Criado: '{texto[:30]}...' ({len(linhas)} linhas)")
         return clip
         
     except Exception as e:
@@ -1854,6 +1883,7 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
         # Título
         title_clip = None
         if config.get("generateTitles", True) and title and PIL_AVAILABLE:
+            logger.info(f"[TITULO] Gerando título: '{title[:40]}...'")
             title_style = config.get("titleStyle", {})
             safe_title_text = sanitize_input(str(title).upper(), max_len=80)
             title_clip = criar_titulo_simples(
@@ -1870,7 +1900,16 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
             if title_clip:
                 layers.append(title_clip)
                 clips_to_close.append(title_clip)
-                logger.debug("[RENDER] Título adicionado")
+                logger.info("[TITULO] Adicionado à composição")
+            else:
+                logger.warning("[TITULO] Falha ao criar título - verifique fontes instaladas")
+        else:
+            if not config.get("generateTitles", True):
+                logger.info("[TITULO] Geração de títulos desativada")
+            elif not title:
+                logger.info("[TITULO] Nenhum título fornecido")
+            elif not PIL_AVAILABLE:
+                logger.warning("[TITULO] PIL não disponível")
 
         # Composição final
         final = moviepy_imports['CompositeVideoClip'](layers, size=(target_w, target_h))
@@ -2050,7 +2089,7 @@ def handler(event):
     
     # LOG DE INICIALIZAÇÃO
     logger.info("=" * 70)
-    logger.info(f"ANIMECUT v12.5 - NOVA REQUISIÇÃO [ID: {request_id}]")
+    logger.info(f"ANIMECUT v12.6 - NOVA REQUISIÇÃO [ID: {request_id}]")
     logger.info("=" * 70)
     
     # LOG DE STATUS DO SISTEMA
@@ -2110,7 +2149,17 @@ def handler(event):
         # Background (opcional) - não escapar HTML em URLs
         bg_url = input_data.get("background_url")
         bg_url = sanitize_input(bg_url, escape_html=False) if bg_url else None
-        bg_path = download_background(bg_url) if bg_url else None
+        
+        if bg_url:
+            logger.info(f"[BACKGROUND] URL recebida: {bg_url[:80]}...")
+            bg_path = download_background(bg_url)
+            if bg_path:
+                logger.info(f"[BACKGROUND] Baixado com sucesso: {bg_path}")
+            else:
+                logger.warning("[BACKGROUND] Falha ao baixar background")
+        else:
+            bg_path = None
+            logger.info("[BACKGROUND] Nenhuma URL de background fornecida")
         
         # Configuração
         config = {
@@ -2335,7 +2384,7 @@ if __name__ == "__main__":
     try:
         # Banner
         print("\n" + "="*70)
-        print("ANIMECUT SERVERLESS v12.5 - ENCODING DEFINITIVO")
+        print("ANIMECUT SERVERLESS v12.6 - B2 + FONTS + TITLES FIX")
         print("Todas as correções aplicadas:")
         print("  ✓ Gestão de memória GPU otimizada")
         print("  ✓ Cleanup robusto de recursos")
