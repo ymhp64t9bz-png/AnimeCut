@@ -1,5 +1,5 @@
-# ✂️ AnimeCut Serverless v12 ULTIMATE Requirements
-# Este arquivo prioriza estabilidade e velocidade de build
+# ✂️ AnimeCut Serverless v12.1 ULTRA-STABLE Requirements
+# Otimizado para RunPod build sem problemas
 
 # ==================== CORE ====================
 runpod>=1.6.0
@@ -8,26 +8,21 @@ tqdm>=4.66.4
 colorama
 
 # ==================== NUMPY SHIELD (CRÍTICO) ====================
-# Deve ser < 2.0 para compatibilidade com PyTorch e OpenCV atuais
+# Deve ser < 2.0 para compatibilidade com PyTorch e OpenCV
 numpy==1.26.4
 
 # ==================== PROCESSAMENTO DE VÍDEO ====================
-# MoviePy v2 (Dev) para melhor performance e menos bugs com numpy novo
 moviepy==1.0.3
 imageio>=2.34.1
 imageio-ffmpeg>=0.5.1
-# OpenCV Headless para ambiente servidor
 opencv-python-headless>=4.9.0.80
+proglog>=0.1.10
 
 # ==================== IA & VISÃO (STACK TURBO) ====================
-# YOLO para Detecção de Rostos e Smart Crop
 ultralytics
-
-# Limpeza de Áudio Profissional
 deepfilternet
 
-# Transcrição Acelerada (Flash Attention requer GPU, aqui usamos fallback CPU-safe)
-# insanely-fast-whisper instala transformers e torch, cuidaremos para usar versões compatíveis
+# ==================== WHISPER & TRANSCRIÇÃO ====================
 insanely-fast-whisper
 faster-whisper
 transformers>=4.40.0
@@ -37,17 +32,21 @@ scipy
 protobuf
 sentencepiece
 
-# ==================== OUTROS ====================
+# ==================== PROCESSAMENTO DE ÁUDIO ====================
+librosa
+soundfile>=0.12.1
+
+# ==================== AWS & ARMAZENAMENTO ====================
 boto3>=1.34.0
 botocore>=1.34.0
-Pillow>=10.3.0
-soundfile>=0.12.1
-decorator<5.0
-librosa
 
-# Utilitários de compilação
-Cython<3
+# ==================== FERRAMENTAS DE IMAGEM ====================
+Pillow>=10.3.0
 basicsr>=1.4.2
 facexlib>=0.2.5
 gfpgan>=1.3.8
 realesrgan>=0.3.0
+
+# ==================== UTILITIES ====================
+decorator<5.0
+Cython<3
