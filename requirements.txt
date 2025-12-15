@@ -1,5 +1,5 @@
-# ✂️ AnimeCut Serverless v12.1 ULTRA-STABLE Requirements
-# Otimizado para RunPod build sem problemas
+# ✂️ AnimeCut Serverless v12.2 - FIXED Requirements
+# CORREÇÃO: Versões compatíveis com cuDNN 9 e PyTorch 2.2.1+cu121
 
 # ==================== CORE ====================
 runpod>=1.6.0
@@ -23,8 +23,10 @@ ultralytics
 deepfilternet
 
 # ==================== WHISPER & TRANSCRIÇÃO ====================
-insanely-fast-whisper
-faster-whisper
+# CRÍTICO: ctranslate2 >= 4.0 requer cuDNN 9.x
+# O Dockerfile DEVE instalar cuDNN 9 para estas versões funcionarem
+ctranslate2>=4.0.0
+faster-whisper>=1.0.0
 transformers>=4.40.0
 accelerate>=0.30.0
 optimum
@@ -48,5 +50,6 @@ gfpgan>=1.3.8
 realesrgan>=0.3.0
 
 # ==================== UTILITIES ====================
-decorator<5.0
-Cython<3
+"decorator<5.0"
+"Cython<3"
+
