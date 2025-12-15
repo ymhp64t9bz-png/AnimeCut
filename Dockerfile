@@ -46,6 +46,9 @@ RUN python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 # Copiar handler
 COPY handler.py .
 
+# Sanity check: valida sintaxe do handler sem executar imports pesados
+RUN python3 -m py_compile handler.py && python3 -c "print('HANDLER_COMPILED_OK')"
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD python3 -c "import sys; sys.exit(0)" || exit 1
