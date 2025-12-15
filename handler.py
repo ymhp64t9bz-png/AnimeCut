@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AnimeCut Serverless v12.3 NVENC FIXED - TODOS OS BUGS CORRIGIDOS
+AnimeCut Serverless v12.4 CLIP MANAGEMENT FIXED - TODOS OS BUGS CORRIGIDOS
 Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1
 CORREÇÕES: GPU estável, memória otimizada, cleanup robusto, fallbacks seguros
 """
@@ -1749,11 +1749,13 @@ def moviepy_clip_context(*clips):
 
 @safe_gpu_operation
 def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict) -> str:
-    """Processa um corte individual OTIMIZADO PARA GPU com cleanup robusto"""
+    """Processa um corte individual OTIMIZADO PARA GPU com cleanup robusto
     
-    video = None
-    clip = None
-    bg_clip = None
+    v12.4: Corrigido gerenciamento de clips MoviePy - sem ExitStack prematuro
+    """
+    
+    # Lista para rastrear clips a serem fechados
+    clips_to_close = []
     
     try:
         start = cut_data.get('start', 0)
@@ -1770,32 +1772,33 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
         if not is_safe_path(VOLUME_PATH, video_path) and not is_safe_path(TEMP_DIR, video_path) and not is_safe_path(CACHE_DIR, video_path):
             raise ValueError(f"Caminho de vídeo não permitido: {video_path}")
 
-        # Usa ExitStack para garantir fechamento ordenado de clips
-        with contextlib.ExitStack() as stack:
-            video = moviepy_imports['VideoFileClip'](video_path)
-            stack.callback(lambda v=video: getattr(v, 'close', lambda: None)())
+        # Carrega vídeo
+        video = moviepy_imports['VideoFileClip'](video_path)
+        clips_to_close.append(video)
 
-            # Valida tempos contra duração do vídeo
-            if end > video.duration:
-                logger.warning(f"[WARNING] Ajustando fim de {end}s para {video.duration}s")
-                end = video.duration
+        # Valida tempos contra duração do vídeo
+        if end > video.duration:
+            logger.warning(f"[WARNING] Ajustando fim de {end}s para {video.duration}s")
+            end = video.duration
 
-            if start >= video.duration:
-                raise ValueError(f"Start {start}s excede duração do vídeo {video.duration}s")
+        if start >= video.duration:
+            raise ValueError(f"Start {start}s excede duração do vídeo {video.duration}s")
 
-            # Corta segmento
-            clip = video.subclip(start, end)
-            stack.callback(lambda c=clip: getattr(c, 'close', lambda: None)())
+        # Corta segmento
+        clip = video.subclip(start, end)
+        clips_to_close.append(clip)
 
-            # Aplica anti-shadowban
-            if config.get("antiShadowban", True):
-                clip = apply_antishadowban(clip)
+        # Aplica anti-shadowban
+        if config.get("antiShadowban", True):
+            clip = apply_antishadowban(clip)
+            clips_to_close.append(clip)
         
         # Configurações TikTok
         target_w, target_h = 1080, 1920
         
         # Background
         bg_path = config.get("background_path")
+        bg_clip = None
 
         if bg_path and os.path.exists(bg_path) and PIL_AVAILABLE:
             try:
@@ -1806,7 +1809,7 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
                 bg_img = Image.open(bg_path).convert('RGB')
                 bg_img = bg_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
                 bg_clip = moviepy_imports['ImageClip'](np.array(bg_img)).set_duration(clip.duration)
-                stack.callback(lambda b=bg_clip: getattr(b, 'close', lambda: None)())
+                clips_to_close.append(bg_clip)
                 logger.debug("[RENDER] Background carregado")
             except Exception as e:
                 logger.warning(f"[WARNING] Background falhou: {e}")
@@ -1817,7 +1820,7 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
             bg_color = (15, 15, 30)
             bg_clip = moviepy_imports['ColorClip'](size=(target_w, target_h), color=bg_color)
             bg_clip = bg_clip.set_duration(clip.duration)
-            stack.callback(lambda b=bg_clip: getattr(b, 'close', lambda: None)())
+            clips_to_close.append(bg_clip)
             logger.debug("[RENDER] Background sólido")
         
         # Ajusta vídeo para 9:16
@@ -1836,19 +1839,20 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
             y1 = (h - new_h) / 2
             clip_cropped = clip.crop(y1=y1, height=new_h)
         
-            stack.callback(lambda c=clip_cropped: getattr(c, 'close', lambda: None)())
+        clips_to_close.append(clip_cropped)
 
-            # Redimensiona
-            clip_resized = clip_cropped.resize(width=target_w)
-            stack.callback(lambda c=clip_resized: getattr(c, 'close', lambda: None)())
+        # Redimensiona
+        clip_resized = clip_cropped.resize(width=target_w)
+        clips_to_close.append(clip_resized)
 
-            clip_pos = clip_resized.set_position(('center', 'center'))
-            stack.callback(lambda c=clip_pos: getattr(c, 'close', lambda: None)())
+        clip_pos = clip_resized.set_position(('center', 'center'))
+        clips_to_close.append(clip_pos)
         
         # Camadas
         layers = [bg_clip, clip_pos]
 
         # Título
+        title_clip = None
         if config.get("generateTitles", True) and title and PIL_AVAILABLE:
             title_style = config.get("titleStyle", {})
             safe_title_text = sanitize_input(str(title).upper(), max_len=80)
@@ -1865,12 +1869,12 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
 
             if title_clip:
                 layers.append(title_clip)
-                stack.callback(lambda t=title_clip: getattr(t, 'close', lambda: None)())
+                clips_to_close.append(title_clip)
                 logger.debug("[RENDER] Título adicionado")
 
         # Composição final
         final = moviepy_imports['CompositeVideoClip'](layers, size=(target_w, target_h))
-        stack.callback(lambda f=final: getattr(f, 'close', lambda: None)())
+        clips_to_close.append(final)
 
         # Nome do arquivo de saída
         safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_'))[:30]
@@ -1902,10 +1906,6 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
                     preset = 'p5'  # p5 é um bom balanço velocidade/qualidade
                     
                     # CORREÇÃO v12.3: Parâmetros compatíveis com FFmpeg 4.4.2
-                    # - Usar -rc:v ao invés de -rc
-                    # - Usar -cq:v ao invés de -cq  
-                    # - Remover -tier (não existe para h264_nvenc)
-                    # - Usar hífen ao invés de underscore em spatial-aq e temporal-aq
                     ffmpeg_params.extend([
                         '-rc:v', 'vbr',
                         '-cq:v', '23',
@@ -1933,8 +1933,7 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
                 '-level', '4.0'
             ])
         
-        # CORREÇÃO v12.3: Renderização FORA do bloco if libx264
-        # Isso garante que write_videofile seja executado para NVENC também
+        # Renderiza
         logger.info(f"[RENDERING] Renderizando {output_filename} com codec {codec}...")
         temp_audio = TEMP_DIR / f"temp_audio_{num}_{uuid.uuid4().hex[:6]}.m4a"
 
@@ -1968,6 +1967,14 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
         raise
         
     finally:
+        # CORREÇÃO v12.4: Cleanup robusto de todos os clips
+        for clip_obj in reversed(clips_to_close):
+            try:
+                if clip_obj is not None and hasattr(clip_obj, 'close'):
+                    clip_obj.close()
+            except Exception as e:
+                logger.debug(f"[CLEANUP] Erro ao fechar clip: {e}")
+        
         # Força coleta de lixo
         gc.collect()
 
@@ -2021,7 +2028,7 @@ def handler(event):
     
     # LOG DE INICIALIZAÇÃO
     logger.info("=" * 70)
-    logger.info(f"ANIMECUT v12.3 - NOVA REQUISIÇÃO [ID: {request_id}]")
+    logger.info(f"ANIMECUT v12.4 - NOVA REQUISIÇÃO [ID: {request_id}]")
     logger.info("=" * 70)
     
     # LOG DE STATUS DO SISTEMA
@@ -2306,7 +2313,7 @@ if __name__ == "__main__":
     try:
         # Banner
         print("\n" + "="*70)
-        print("ANIMECUT SERVERLESS v12.3 - NVENC FIXED")
+        print("ANIMECUT SERVERLESS v12.4 - CLIP MANAGEMENT FIXED")
         print("Todas as correções aplicadas:")
         print("  ✓ Gestão de memória GPU otimizada")
         print("  ✓ Cleanup robusto de recursos")
