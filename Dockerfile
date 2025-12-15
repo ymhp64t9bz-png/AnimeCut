@@ -1,101 +1,86 @@
-# ✂️ AnimeCut Serverless V12.1 ULTRA-STABLE - FINAL BUILD
-FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
+# Dockerfile para AnimeCut v12.2
+FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
 
-WORKDIR /app
-
-# Variáveis de Ambiente
-ENV BUILD_DATE="V12_1_ULTRA_STABLE"
-ENV PYTHONUNBUFFERED=1
+# Variáveis de ambiente críticas
 ENV DEBIAN_FRONTEND=noninteractive
-ENV HF_HOME="/runpod-volume/.cache/huggingface"
-ENV CUDA_VISIBLE_DEVICES="0"
-ENV TF_CPP_MIN_LOG_LEVEL="3"
-ENV PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:512"
+ENV TZ=UTC
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PATH="/usr/local/cuda/bin:$PATH"
+ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:$LD_LIBRARY_PATH"
 
-# ==================== 1. DEPENDÊNCIAS DE SISTEMA ====================
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Instala dependências do sistema
+RUN apt-get update && apt-get install -y \
+    software-properties-common \
     build-essential \
-    python3-dev \
-    pkg-config \
-    ffmpeg \
-    libsndfile1 \
-    libgl1 \
-    libglib2.0-0 \
+    cmake \
     git \
-    nano \
-    curl \
     wget \
+    curl \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsndfile1 \
+    sox \
+    libsox-fmt-mp3 \
+    python3-pip \
+    python3-dev \
+    python3-venv \
+    python3-tk \
+    fonts-dejavu-core \
+    fonts-liberation \
+    ttf-mscorefonts-installer \
     && rm -rf /var/lib/apt/lists/*
 
-# Atualizar pip, setuptools e wheel
-RUN pip install --upgrade pip setuptools wheel
+# Instala fontes adicionais
+RUN mkdir -p /usr/share/fonts/truetype/custom/ && \
+    wget -q -O /usr/share/fonts/truetype/custom/impact.ttf \
+    https://github.com/google/fonts/raw/main/apache/impact/Impact.ttf && \
+    fc-cache -f -v
 
-# ==================== 2. NUMPY SHIELD (CRÍTICO - PRIMEIRO) ====================
-# Instalar numpy 1.26.4 ANTES de qualquer dependência para evitar conflitos
-RUN pip install --no-cache-dir "numpy==1.26.4"
+WORKDIR /workspace
 
-# ==================== 3. CORE DEPENDENCIES ====================
-RUN pip install --no-cache-dir \
-    runpod>=1.6.0 \
-    boto3>=1.34.0 \
-    botocore>=1.34.0 \
-    requests \
-    tqdm \
-    colorama
+# Cria estrutura de diretórios
+RUN mkdir -p /workspace/{output,models,fonts,cache,temp} /tmp/animecut
 
-# ==================== 4. PROCESSAMENTO DE VÍDEO ====================
-RUN pip install --no-cache-dir \
-    "moviepy==1.0.3" \
-    imageio>=2.34.1 \
-    imageio-ffmpeg>=0.5.1 \
-    proglog>=0.1.10 \
-    "opencv-python-headless>=4.9.0.80"
+# Copia requirements primeiro para cache de camadas
+COPY requirements_v12.2.txt /tmp/requirements.txt
 
-# ==================== 5. PROCESSAMENTO DE ÁUDIO ====================
-RUN pip install --no-cache-dir \
-    librosa \
-    soundfile>=0.12.1 \
-    scipy
+# Instala Python dependencies com versões específicas para CUDA 12.1
+RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip3 install --no-cache-dir \
+    torch==2.2.1+cu121 \
+    torchvision==0.17.1+cu121 \
+    torchaudio==2.2.1+cu121 \
+    --index-url https://download.pytorch.org/whl/cu121
 
-# ==================== 6. IA & VISÃO (YOLO + TOOLS) ====================
-RUN pip install --no-cache-dir \
-    ultralytics \
-    deepfilternet \
-    basicsr>=1.4.2 \
-    facexlib>=0.2.5 \
-    gfpgan>=1.3.8 \
-    realesrgan>=0.3.0
+# Instala outras dependências
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
 
-# ==================== 7. WHISPER & TRANSCRIÇÃO ====================
-RUN pip install --no-cache-dir \
-    transformers>=4.40.0 \
-    accelerate>=0.30.0 \
-    optimum \
-    protobuf \
-    sentencepiece \
-    faster-whisper \
-    insanely-fast-whisper
+# Instala pacotes opcionais separadamente para evitar conflitos
+RUN pip3 install --no-cache-dir \
+    opencv-python-headless==4.9.0.80 \
+    ultralytics==8.1.22 \
+    deepfilternet==0.6.1 \
+    faster-whisper==0.10.0 \
+    transformers==4.40.0 \
+    moviepy==1.0.3 \
+    imageio[ffmpeg]==2.34.1
 
-# ==================== 8. FERRAMENTAS ====================
-RUN pip install --no-cache-dir \
-    "Pillow>=10.3.0" \
-    "decorator<5.0" \
-    "Cython<3"
+# Copia código fonte
+COPY handler.py /workspace/handler.py
+COPY runpod_handler.py /workspace/runpod_handler.py
 
-# ==================== 9. FORÇA FINAL - NUMPY INTEGRITY ====================
-# Força numpy 1.26.4 no final para garantir integridade após todas as instalações
-RUN pip install "numpy==1.26.4" --force-reinstall --no-cache-dir
-
-# ==================== 10. PRÉ-CARREGAMENTO DE MODELOS ====================
-# Pré-carrega YOLO para evitar delays na primeira requisição
-RUN python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
-
-# Copia handler
-COPY handler.py .
+# Permissões
+RUN chmod +x /workspace/handler.py && \
+    chmod +x /workspace/runpod_handler.py
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python3 -c "import sys; sys.exit(0)" || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python3 -c "import sys; sys.path.insert(0, '/workspace'); from handler import health_check; print(health_check())" || exit 1
 
-# Comando de entrada
-CMD ["python3", "-u", "handler.py"]
+# Comando padrão
+CMD ["python3", "/workspace/runpod_handler.py"]
