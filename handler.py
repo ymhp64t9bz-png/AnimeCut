@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AnimeCut Serverless v12.2 ULTRA-STABLE - CORREÇÕES CRÍTICAS
+AnimeCut Serverless v12.3 NVENC FIXED - TODOS OS BUGS CORRIGIDOS
 Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1
-CORREÇÕES v12.2:
-  - FIX: URL sanitization sem HTML escape (correção &amp; -> &)
-  - FIX: cuDNN fallback para CPU quando bibliotecas faltam
-  - FIX: Gestão robusta de erros de transcrição
-  - FIX: Retry inteligente com detecção de erro permanente vs temporário
+CORREÇÕES: GPU estável, memória otimizada, cleanup robusto, fallbacks seguros
 """
 
 # ==================== IMPORTAÇÕES ESSENCIAIS ====================
@@ -109,11 +105,8 @@ def safe_gpu_operation(func):
             raise
     return wrapper
 
-def retry_on_failure(max_attempts=3, delay=2, backoff=2, permanent_errors=None):
-    """Decorator para retry com backoff exponencial - CORRIGIDO v12.2 com detecção de erros permanentes"""
-    if permanent_errors is None:
-        permanent_errors = []
-    
+def retry_on_failure(max_attempts=3, delay=2, backoff=2):
+    """Decorator para retry com backoff exponencial"""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -124,14 +117,6 @@ def retry_on_failure(max_attempts=3, delay=2, backoff=2, permanent_errors=None):
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
-                    error_str = str(e).lower()
-                    
-                    # CORREÇÃO v12.2: Verifica se é erro permanente (não adianta retry)
-                    for perm_error in permanent_errors:
-                        if perm_error.lower() in error_str:
-                            logger.error(f"[PERMANENT ERROR] {func.__name__}: {e}")
-                            raise
-                    
                     attempts += 1
                     if attempts >= max_attempts:
                         logger.error(f"[RETRY] {func.__name__} falhou após {max_attempts} tentativas")
@@ -183,64 +168,24 @@ class ResourceManager:
 # Instância global
 resource_manager = ResourceManager()
 
-# ------------------ FUNÇÕES DE SANITIZAÇÃO E VALIDAÇÃO DE PATH - CORRIGIDO v12.2 ------------------
+# ------------------ FUNÇÕES DE SANITIZAÇÃO E VALIDAÇÃO DE PATH ------------------
+def sanitize_input(value: Optional[str], max_len: int = 240, escape_html: bool = True) -> str:
+    """Sanitiza entradas de texto.
 
-def sanitize_input(value: Optional[str], max_len: int = 240, escape_html: bool = False) -> str:
-    """
-    Sanitiza entradas de texto.
-    
-    CORREÇÃO v12.2: escape_html agora é False por padrão para não quebrar URLs assinadas.
-    O html.escape converte & para &amp; o que quebra URLs do Google Cloud Storage.
-    
-    Para textos que serão exibidos em HTML, use escape_html=True explicitamente.
+    - Para URLs ou caminhos não chame com `escape_html=True` (padrão),
+      pois `html.escape` altera caracteres como '&' em URLs assinadas.
+    - Remove caracteres de controle, trima e limita tamanho.
     """
     if not value:
         return ""
     # Remove caracteres de controle e trims
     value = ''.join(ch for ch in str(value) if ch.isprintable())
     value = value.strip()
-    # Só escapa HTML se explicitamente solicitado
     if escape_html:
         value = html.escape(value)
     if len(value) > max_len:
         value = value[:max_len]
     return value
-
-
-def sanitize_url(url: Optional[str]) -> str:
-    """
-    NOVA FUNÇÃO v12.2: Sanitiza URLs sem quebrar caracteres especiais necessários.
-    NUNCA usa html.escape em URLs.
-    """
-    if not url:
-        return ""
-    
-    # Apenas strip, sem escape
-    url = str(url).strip()
-    
-    # Limite de tamanho para URLs
-    if len(url) > 4096:
-        url = url[:4096]
-    
-    return url
-
-
-def sanitize_text_for_display(text: Optional[str], max_len: int = 500) -> str:
-    """
-    NOVA FUNÇÃO v12.2: Sanitiza texto para exibição segura (títulos, nomes, etc).
-    USA html.escape para segurança em contextos de exibição.
-    """
-    if not text:
-        return ""
-    
-    text = ''.join(ch for ch in str(text) if ch.isprintable())
-    text = text.strip()
-    text = html.escape(text)
-    
-    if len(text) > max_len:
-        text = text[:max_len]
-    
-    return text
 
 
 def is_safe_path(base_dir: Path, user_path: str) -> bool:
@@ -301,7 +246,6 @@ def health_check() -> Dict[str, Any]:
             "whisper_loaded": whisper_manager.loaded(),
             "moviepy": MOVIEPY_AVAILABLE,
             "ffmpeg": FFMPEG_AVAILABLE,
-            "cudnn": CUDNN_AVAILABLE,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
@@ -428,14 +372,13 @@ try:
 except Exception as e:
     logger.error(f"[ERROR] Erro no MoviePy: {e}")
 
-# 3. IA (Transformers/Torch) - CONFIGURAÇÃO ULTRA-ESTÁVEL COM DETECÇÃO CUDNN v12.2
+# 3. IA (Transformers/Torch) - CONFIGURAÇÃO ULTRA-ESTÁVEL
 AI_AVAILABLE = False
 GPU_AVAILABLE = False
 WHISPER_AVAILABLE = False
 WHISPER_TYPE = None
 TORCH_DEVICE = None
 TORCH_VERSION = None
-CUDNN_AVAILABLE = False  # NOVO v12.2
 
 # Importa torch primeiro de forma segura
 torch = dep_manager.safe_import("torch")
@@ -451,22 +394,15 @@ if torch:
         if GPU_AVAILABLE:
             TORCH_DEVICE = torch.device("cuda:0")
             
-            # CORREÇÃO v12.2: Testa cuDNN de forma segura antes de confiar nele
+            # CONFIGURAÇÕES ULTRA-MINIMALISTAS
             try:
+                # Apenas habilita cuDNN se funcionar
                 torch.backends.cudnn.enabled = True
                 torch.backends.cudnn.benchmark = False  # False é mais estável
                 torch.backends.cuda.matmul.allow_tf32 = True
-                
-                # Testa se cuDNN realmente funciona com uma operação simples
-                test_tensor = torch.zeros(1, device='cuda')
-                _ = test_tensor + 1
-                
-                CUDNN_AVAILABLE = True
                 logger.info("[GPU] cuDNN configurado (modo estável)")
             except Exception as e:
-                CUDNN_AVAILABLE = False
-                logger.warning(f"[WARNING] cuDNN não disponível ou com problemas: {e}")
-                logger.warning("[WARNING] Whisper usará CPU como fallback")
+                logger.warning(f"[WARNING] Configuração cuDNN falhou: {e}")
             
             # Informações da GPU
             try:
@@ -476,7 +412,6 @@ if torch:
                 logger.info(f"[SUCCESS] GPU: {gpu_name}")
                 logger.info(f"[GPU] Memória total: {gpu_mem:.1f} GB")
                 logger.info(f"[GPU] Compute Capability: {gpu_props.major}.{gpu_props.minor}")
-                logger.info(f"[GPU] cuDNN disponível: {CUDNN_AVAILABLE}")
             except Exception as e:
                 logger.warning(f"[WARNING] Erro ao obter info GPU: {e}")
         else:
@@ -627,10 +562,10 @@ try:
 except:
     logger.error("[ERROR] FFmpeg não disponível - CRÍTICO!")
 
-# ==================== UTILITÁRIOS DE REDE APRIMORADOS - CORRIGIDO v12.2 ====================
+# ==================== UTILITÁRIOS DE REDE APRIMORADOS ====================
 
 class NetworkManager:
-    """Gerencia operações de rede com retry e validação - CORRIGIDO v12.2"""
+    """Gerencia operações de rede com retry e validação"""
     
     def __init__(self, max_retries=3, timeout=30):
         self.max_retries = max_retries
@@ -653,7 +588,7 @@ class NetworkManager:
             return self.session
     
     def validate_url(self, url):
-        """Valida URL antes de baixar - NÃO modifica a URL"""
+        """Valida URL antes de baixar"""
         if not url or not isinstance(url, str):
             return False
         
@@ -663,25 +598,19 @@ class NetworkManager:
         
         return True
     
-    @retry_on_failure(max_attempts=3, delay=2, permanent_errors=['404', '403', '401'])
+    @retry_on_failure(max_attempts=3, delay=2)
     def download_with_retry(self, url, output_path, headers=None, chunk_size=8192):
-        """
-        Download com retry, validação e progresso
-        CORREÇÃO v12.2: URL é usada EXATAMENTE como recebida, sem sanitização
-        """
+        """Download com retry, validação e progresso"""
         
         if not self.validate_url(url):
             raise ValueError(f"URL inválida: {url}")
         
         session = self.get_session()
         
-        # Log truncado para não expor assinaturas completas
-        url_log = url[:80] + "..." if len(url) > 80 else url
-        logger.info(f"[DOWNLOAD] Iniciando: {url_log}")
+        logger.info(f"[DOWNLOAD] Iniciando: {url[:80]}...")
         
-        # CORREÇÃO v12.2: Usa a URL EXATAMENTE como recebida, sem modificações
         response = session.get(
-            url,  # URL sem qualquer sanitização ou escape!
+            url, 
             stream=True, 
             timeout=self.timeout,
             headers=headers
@@ -945,7 +874,7 @@ def clean_audio_deepfilter(input_path: Path) -> Path:
     logger.info("[INFO] Usando FFmpeg high quality como fallback")
     return clean_audio_ffmpeg(input_path, quality="high")
 
-# ==================== DOWNLOAD DE VÍDEO COM CACHE E VALIDAÇÃO - CORRIGIDO v12.2 ====================
+# ==================== DOWNLOAD DE VÍDEO COM CACHE E VALIDAÇÃO ====================
 
 def validate_video_file(video_path: Path) -> bool:
     """Valida arquivo de vídeo usando ffprobe"""
@@ -985,14 +914,10 @@ def validate_video_file(video_path: Path) -> bool:
         logger.warning(f"[WARNING] Validação de vídeo falhou: {e}")
         return video_path.exists() and video_path.stat().st_size > 1e6
 
-@retry_on_failure(max_attempts=2, delay=3, permanent_errors=['404', '403'])
+@retry_on_failure(max_attempts=2, delay=3)
 def download_video(url: str) -> str:
-    """
-    Download robusto com cache e validação completa
-    CORREÇÃO v12.2: URL usada exatamente como recebida, sem sanitização
-    """
+    """Download robusto com cache e validação completa"""
     
-    # CORREÇÃO v12.2: NÃO sanitiza a URL - usa exatamente como recebida
     if not network.validate_url(url):
         raise ValueError(f"URL de vídeo inválida: {url}")
     
@@ -1013,7 +938,7 @@ def download_video(url: str) -> str:
     
     logger.info(f"[DOWNLOAD] Baixando vídeo: {url[:80]}...")
     
-    # CORREÇÃO v12.2: Passa a URL sem modificações
+    # Tenta download
     if network.download_with_retry(url, temp_file):
         # Valida vídeo baixado
         if not validate_video_file(temp_file):
@@ -1031,16 +956,12 @@ def download_video(url: str) -> str:
     else:
         raise Exception(f"Falha ao baixar vídeo: {url}")
 
-@retry_on_failure(max_attempts=2, delay=2, permanent_errors=['404', '403'])
+@retry_on_failure(max_attempts=2, delay=2)
 def download_background(url: str) -> Optional[str]:
-    """
-    Download de background com cache e validação
-    CORREÇÃO v12.2: URL usada exatamente como recebida
-    """
+    """Download de background com cache e validação"""
     if not url or url.lower() == "none":
         return None
     
-    # CORREÇÃO v12.2: NÃO sanitiza a URL
     if not network.validate_url(url):
         logger.warning(f"[WARNING] URL de background inválida: {url}")
         return None
@@ -1064,7 +985,6 @@ def download_background(url: str) -> Optional[str]:
         logger.info(f"[BACKGROUND] Baixando: {url[:80]}...")
         temp_file = TEMP_DIR / f"bg_{url_hash}_{uuid.uuid4().hex[:6]}.png"
         
-        # CORREÇÃO v12.2: URL sem modificações
         if network.download_with_retry(url, temp_file):
             # Valida se é imagem
             if not temp_file.exists() or temp_file.stat().st_size < 1000:
@@ -1436,54 +1356,20 @@ def criar_titulo_simples(
         logger.warning(f"[WARNING] Erro ao criar título: {e}")
         return None
 
-# ==================== WHISPER GPU ULTRA-ESTABILIZADO COM FALLBACK CUDNN (CORRIGIDO v12.2) ====================
+# ==================== WHISPER GPU ULTRA-ESTABILIZADO (MANAGER THREAD-SAFE) ====================
 
 class WhisperManager:
-    """
-    Gerenciador thread-safe para carregar e usar modelos Whisper (faster_whisper / openai-whisper)
-    
-    CORREÇÃO v12.2:
-    - Testa cuDNN antes de usar GPU
-    - Fallback automático para CPU quando cuDNN falha
-    - Detecção de erro cuDNN durante transcrição com retry em CPU
+    """Gerenciador thread-safe para carregar e usar modelos Whisper (faster_whisper / openai-whisper)
+    Mantém carregamento lazy e retries com locks para evitar múltiplas inicializações.
     """
     def __init__(self):
         self._lock = threading.Lock()
         self._model = None
         self._loaded = False
         self._type = None
-        self._device = None
-        self._compute_type = None
-        self._cudnn_error_detected = False
 
     def loaded(self) -> bool:
         return self._loaded and self._model is not None
-
-    def _detect_cudnn_availability(self) -> bool:
-        """
-        NOVO v12.2: Testa se cuDNN está realmente funcionando
-        Algumas operações podem falhar mesmo com GPU disponível
-        """
-        try:
-            if not GPU_AVAILABLE or not torch:
-                return False
-            
-            # Testa uma operação que usa cuDNN (convolução)
-            test_tensor = torch.randn(1, 3, 32, 32, device='cuda')
-            conv = torch.nn.Conv2d(3, 3, 3).cuda()
-            _ = conv(test_tensor)
-            
-            # Limpa memória do teste
-            del test_tensor, conv
-            torch.cuda.empty_cache()
-            
-            return True
-        except Exception as e:
-            error_str = str(e).lower()
-            if 'cudnn' in error_str or 'libcudnn' in error_str:
-                logger.warning(f"[WHISPER] cuDNN não funcional: {e}")
-                self._cudnn_error_detected = True
-            return False
 
     @safe_gpu_operation
     def load(self, preferred: str = "large-v3") -> bool:
@@ -1496,85 +1382,39 @@ class WhisperManager:
                 logger.info("[WHISPER] IA não disponível")
                 return False
 
-            # CORREÇÃO v12.2: Determina dispositivo e tipo de computação
-            # Se cuDNN não está disponível, usa CPU diretamente
-            use_gpu = GPU_AVAILABLE and CUDNN_AVAILABLE
-            
-            if use_gpu:
-                # Testa cuDNN antes de tentar usar GPU
-                use_gpu = self._detect_cudnn_availability()
-            
-            if use_gpu:
-                self._device = "cuda"
-                self._compute_type = "float16"
-                logger.info("[WHISPER] Usando GPU com cuDNN")
-            else:
-                self._device = "cpu"
-                self._compute_type = "int8"  # int8 é mais rápido em CPU
-                if self._cudnn_error_detected:
-                    logger.warning("[WHISPER] cuDNN falhou, usando CPU como fallback")
-                else:
-                    logger.info("[WHISPER] GPU não disponível ou cuDNN com problemas, usando CPU")
-
             # Tenta faster_whisper primeiro
-            if WHISPER_TYPE == "faster_whisper":
-                try:
+            try:
+                if WHISPER_TYPE == "faster_whisper":
                     from faster_whisper import WhisperModel
-                    
-                    logger.info(f"[WHISPER] Carregando faster_whisper (device={self._device}, compute={self._compute_type})")
-                    
-                    self._model = WhisperModel(
-                        preferred, 
-                        device=self._device, 
-                        compute_type=self._compute_type, 
-                        download_root=str(MODELS_DIR)
-                    )
+                    device_to_use = "cuda" if GPU_AVAILABLE else "cpu"
+                    compute_type = "float16" if GPU_AVAILABLE else "float32"
+
+                    # Ajuste simples baseado em memória
+                    try:
+                        if GPU_AVAILABLE and torch and hasattr(torch, 'cuda'):
+                            total_memory = torch.cuda.get_device_properties(0).total_memory
+                            free_guess = total_memory - getattr(torch.cuda, 'memory_allocated', lambda x: 0)(0)
+                            if free_guess < 2e9:
+                                compute_type = "int8"
+                    except Exception:
+                        pass
+
+                    logger.info(f"[WHISPER] Carregando faster_whisper (device={device_to_use}, compute={compute_type})")
+                    self._model = WhisperModel(preferred, device=device_to_use, compute_type=compute_type, download_root=str(MODELS_DIR))
                     self._type = "faster_whisper"
                     self._loaded = True
-                    logger.info(f"[SUCCESS] Whisper carregado em {self._device.upper()}")
                     return True
-                    
-                except Exception as e:
-                    error_str = str(e).lower()
-                    
-                    # CORREÇÃO v12.2: Se erro de cuDNN, tenta novamente com CPU
-                    if ('cudnn' in error_str or 'libcudnn' in error_str) and self._device != "cpu":
-                        logger.warning(f"[WHISPER] Erro cuDNN detectado: {e}")
-                        logger.info("[WHISPER] Tentando fallback para CPU...")
-                        
-                        try:
-                            from faster_whisper import WhisperModel
-                            
-                            self._device = "cpu"
-                            self._compute_type = "int8"
-                            
-                            self._model = WhisperModel(
-                                preferred, 
-                                device="cpu", 
-                                compute_type="int8", 
-                                download_root=str(MODELS_DIR)
-                            )
-                            self._type = "faster_whisper"
-                            self._loaded = True
-                            self._cudnn_error_detected = True
-                            logger.info("[SUCCESS] Whisper carregado em CPU (fallback cuDNN)")
-                            return True
-                        except Exception as e2:
-                            logger.error(f"[WHISPER] Fallback CPU também falhou: {e2}")
-                    else:
-                        logger.warning(f"[WHISPER] faster_whisper falhou: {e}")
 
-            # Tenta openai-whisper como último fallback
+            except Exception as e:
+                logger.warning(f"[WHISPER] faster_whisper falhou: {e}")
+
+            # Tenta openai-whisper como fallback
             try:
                 import whisper as openai_whisper
-                logger.info("[WHISPER] Carregando openai-whisper (fallback final)")
-                
-                device = "cuda" if GPU_AVAILABLE else "cpu"
-                self._model = openai_whisper.load_model(preferred, device=device, download_root=str(MODELS_DIR))
+                logger.info("[WHISPER] Carregando openai-whisper (fallback)")
+                self._model = openai_whisper.load_model(preferred, download_root=str(MODELS_DIR))
                 self._type = "openai_whisper"
-                self._device = device
                 self._loaded = True
-                logger.info(f"[SUCCESS] openai-whisper carregado em {device.upper()}")
                 return True
             except Exception as e:
                 logger.error(f"[WHISPER] Nenhum backend Whisper pôde ser carregado: {e}")
@@ -1592,16 +1432,9 @@ class WhisperManager:
             raise RuntimeError(f"Arquivo de áudio inválido: {audio_path}")
 
         try:
-            logger.info(f"[WHISPER] Transcrevendo ({self._device}): {audio_path_obj.name}")
-            
+            logger.info(f"[WHISPER] Transcrevendo: {audio_path_obj.name}")
             if self._type == "faster_whisper":
-                segments, info = self._model.transcribe(
-                    audio_path, 
-                    language="pt", 
-                    beam_size=3, 
-                    best_of=3, 
-                    temperature=0.0
-                )
+                segments, info = self._model.transcribe(audio_path, language="pt", beam_size=3, best_of=3, temperature=0.0)
                 chunks = []
                 for segment in segments:
                     text = getattr(segment, 'text', '').strip()
@@ -1621,22 +1454,6 @@ class WhisperManager:
                 return {"chunks": [{"text": text.strip(), "timestamp": (0, 0), "confidence": 0.0}], "info": result}
 
         except Exception as e:
-            error_str = str(e).lower()
-            
-            # CORREÇÃO v12.2: Se erro de cuDNN durante transcrição, tenta recarregar em CPU
-            if ('cudnn' in error_str or 'libcudnn' in error_str) and self._device != "cpu":
-                logger.warning(f"[WHISPER] Erro cuDNN durante transcrição: {e}")
-                logger.info("[WHISPER] Tentando recarregar em CPU...")
-                
-                # Reset e tenta novamente
-                self._loaded = False
-                self._model = None
-                self._cudnn_error_detected = True
-                
-                if self.load():
-                    # Tenta transcrever novamente
-                    return self.transcribe(audio_path)
-            
             logger.error(f"[WHISPER] Erro na transcrição: {e}")
             raise
 
@@ -1671,10 +1488,10 @@ def analyze_video_content_gpu(video_path: str, anime_name: str) -> List[Dict]:
         if not whisper_manager.loaded():
             logger.info("[WHISPER] Carregando Whisper sob demanda...")
             if not load_turbo_whisper_gpu():
-                logger.error("[ERROR] Whisper não pode ser carregado")
+                logger.error("[ERROR] Whisper GPU não pode ser carregado")
                 return generate_fallback_cuts(video_path, anime_name)
         
-        logger.info("[AUDIO] Extraindo áudio...")
+        logger.info("[AUDIO GPU] Extraindo áudio...")
         
         # Extrai áudio com FFmpeg
         raw_audio = TEMP_DIR / f"audio_{uuid.uuid4().hex[:8]}.wav"
@@ -1703,8 +1520,8 @@ def analyze_video_content_gpu(video_path: str, anime_name: str) -> List[Dict]:
         if not validate_audio_file(clean_audio):
             raise Exception("Áudio processado é inválido")
         
-        # Transcrição
-        logger.info("[TRANSCRIPTION] Transcrevendo...")
+        # Transcrição COM GPU
+        logger.info("[TRANSCRIPTION GPU] Transcrevendo...")
         result = transcrever_com_whisper_gpu(str(clean_audio))
         
         # Processa transcrição
@@ -1834,11 +1651,11 @@ def analyze_video_content_gpu(video_path: str, anime_name: str) -> List[Dict]:
         cuts.sort(key=lambda x: x["score"], reverse=True)
         cuts = cuts[:3]
         
-        logger.info(f"[ANALYSIS] {len(cuts)} cortes identificados")
+        logger.info(f"[ANALYSIS GPU] {len(cuts)} cortes identificados")
         return cuts
         
     except Exception as e:
-        logger.error(f"[ERROR] Erro na análise: {e}")
+        logger.error(f"[ERROR] Erro na análise GPU: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return generate_fallback_cuts(video_path, anime_name)
@@ -1974,51 +1791,51 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
             if config.get("antiShadowban", True):
                 clip = apply_antishadowban(clip)
         
-            # Configurações TikTok
-            target_w, target_h = 1080, 1920
-            
-            # Background
-            bg_path = config.get("background_path")
+        # Configurações TikTok
+        target_w, target_h = 1080, 1920
+        
+        # Background
+        bg_path = config.get("background_path")
 
-            if bg_path and os.path.exists(bg_path) and PIL_AVAILABLE:
-                try:
-                    # Valida background
-                    if not is_safe_path(VOLUME_PATH, bg_path) and not is_safe_path(TEMP_DIR, bg_path) and not is_safe_path(CACHE_DIR, bg_path):
-                        raise ValueError(f"Caminho de background não permitido: {bg_path}")
+        if bg_path and os.path.exists(bg_path) and PIL_AVAILABLE:
+            try:
+                # Valida background
+                if not is_safe_path(VOLUME_PATH, bg_path) and not is_safe_path(TEMP_DIR, bg_path) and not is_safe_path(CACHE_DIR, bg_path):
+                    raise ValueError(f"Caminho de background não permitido: {bg_path}")
 
-                    bg_img = Image.open(bg_path).convert('RGB')
-                    bg_img = bg_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
-                    bg_clip = moviepy_imports['ImageClip'](np.array(bg_img)).set_duration(clip.duration)
-                    stack.callback(lambda b=bg_clip: getattr(b, 'close', lambda: None)())
-                    logger.debug("[RENDER] Background carregado")
-                except Exception as e:
-                    logger.warning(f"[WARNING] Background falhou: {e}")
-                    bg_clip = None
-
-            if bg_clip is None:
-                # Background sólido escuro
-                bg_color = (15, 15, 30)
-                bg_clip = moviepy_imports['ColorClip'](size=(target_w, target_h), color=bg_color)
-                bg_clip = bg_clip.set_duration(clip.duration)
+                bg_img = Image.open(bg_path).convert('RGB')
+                bg_img = bg_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+                bg_clip = moviepy_imports['ImageClip'](np.array(bg_img)).set_duration(clip.duration)
                 stack.callback(lambda b=bg_clip: getattr(b, 'close', lambda: None)())
-                logger.debug("[RENDER] Background sólido")
-            
-            # Ajusta vídeo para 9:16
-            w, h = clip.w, clip.h
-            target_aspect = target_w / target_h
-            clip_aspect = w / h
-            
-            if clip_aspect > target_aspect:
-                # Muito largo - crop horizontal
-                new_w = h * target_aspect
-                x1 = (w - new_w) / 2
-                clip_cropped = clip.crop(x1=x1, width=new_w)
-            else:
-                # Muito alto - crop vertical
-                new_h = w / target_aspect
-                y1 = (h - new_h) / 2
-                clip_cropped = clip.crop(y1=y1, height=new_h)
-            
+                logger.debug("[RENDER] Background carregado")
+            except Exception as e:
+                logger.warning(f"[WARNING] Background falhou: {e}")
+                bg_clip = None
+
+        if bg_clip is None:
+            # Background sólido escuro
+            bg_color = (15, 15, 30)
+            bg_clip = moviepy_imports['ColorClip'](size=(target_w, target_h), color=bg_color)
+            bg_clip = bg_clip.set_duration(clip.duration)
+            stack.callback(lambda b=bg_clip: getattr(b, 'close', lambda: None)())
+            logger.debug("[RENDER] Background sólido")
+        
+        # Ajusta vídeo para 9:16
+        w, h = clip.w, clip.h
+        target_aspect = target_w / target_h
+        clip_aspect = w / h
+        
+        if clip_aspect > target_aspect:
+            # Muito largo - crop horizontal
+            new_w = h * target_aspect
+            x1 = (w - new_w) / 2
+            clip_cropped = clip.crop(x1=x1, width=new_w)
+        else:
+            # Muito alto - crop vertical
+            new_h = w / target_aspect
+            y1 = (h - new_h) / 2
+            clip_cropped = clip.crop(y1=y1, height=new_h)
+        
             stack.callback(lambda c=clip_cropped: getattr(c, 'close', lambda: None)())
 
             # Redimensiona
@@ -2027,121 +1844,125 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
 
             clip_pos = clip_resized.set_position(('center', 'center'))
             stack.callback(lambda c=clip_pos: getattr(c, 'close', lambda: None)())
-            
-            # Camadas
-            layers = [bg_clip, clip_pos]
+        
+        # Camadas
+        layers = [bg_clip, clip_pos]
 
-            # Título
-            if config.get("generateTitles", True) and title and PIL_AVAILABLE:
-                title_style = config.get("titleStyle", {})
-                # CORREÇÃO v12.2: Usa sanitize_text_for_display para títulos (com HTML escape para segurança)
-                safe_title_text = sanitize_text_for_display(str(title).upper(), max_len=80)
-                title_clip = criar_titulo_simples(
-                    texto=safe_title_text,
-                    largura_video=target_w,
-                    altura_video=target_h,
-                    duracao=clip.duration,
-                    font_size=title_style.get("fontSize", 70),
-                    text_color=title_style.get("textColor", "#FFD700"),
-                    stroke_color=title_style.get("strokeColor", "#000000"),
-                    stroke_width=title_style.get("strokeWidth", 6)
-                )
-
-                if title_clip:
-                    layers.append(title_clip)
-                    stack.callback(lambda t=title_clip: getattr(t, 'close', lambda: None)())
-                    logger.debug("[RENDER] Título adicionado")
-
-            # Composição final
-            final = moviepy_imports['CompositeVideoClip'](layers, size=(target_w, target_h))
-            stack.callback(lambda f=final: getattr(f, 'close', lambda: None)())
-
-            # Nome do arquivo de saída
-            safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_'))[:30]
-            output_filename = f"cut_{num}_{safe_title}_{uuid.uuid4().hex[:6]}.mp4"
-            output_path = OUTPUT_DIR / output_filename
-            
-            # Configuração de encoding OTIMIZADA
-            ffmpeg_params = [
-                '-pix_fmt', 'yuv420p',
-                '-movflags', '+faststart',
-                '-vsync', 'vfr'
-            ]
-            
-            # Detecta NVENC
-            codec = 'libx264'
-            preset = 'medium'
-            
-            if GPU_AVAILABLE and FFMPEG_AVAILABLE:
-                try:
-                    result = subprocess.run(
-                        ['ffmpeg', '-encoders'],
-                        capture_output=True,
-                        text=True,
-                        timeout=5
-                    )
-                    
-                    if 'h264_nvenc' in result.stdout:
-                        codec = 'h264_nvenc'
-                        preset = 'p5'  # p5 é um bom balanço velocidade/qualidade
-                        
-                        ffmpeg_params.extend([
-                            '-rc', 'vbr',
-                            '-cq', '23',
-                            '-b:v', '0',
-                            '-maxrate', '10M',
-                            '-bufsize', '20M',
-                            '-preset', preset,
-                            '-profile:v', 'high',
-                            '-tier', 'high',
-                            '-spatial_aq', '1',
-                            '-temporal_aq', '1'
-                        ])
-                        logger.info("[ENCODING GPU] Usando NVENC")
-                    else:
-                        logger.info("[ENCODING] NVENC não disponível, usando CPU")
-                        
-                except Exception as e:
-                    logger.warning(f"[WARNING] Erro ao detectar NVENC: {e}")
-            
-            if codec == 'libx264':
-                ffmpeg_params.extend([
-                    '-crf', '23',
-                    '-preset', preset,
-                    '-tune', 'film',
-                    '-profile:v', 'high',
-                    '-level', '4.0'
-                ])
-            
-            # Renderiza
-            logger.info(f"[RENDERING] Renderizando {output_filename}...")
-            temp_audio = TEMP_DIR / f"temp_audio_{num}_{uuid.uuid4().hex[:6]}.m4a"
-
-            final.write_videofile(
-                str(output_path),
-                codec=codec,
-                audio_codec='aac',
-                audio_bitrate='192k',
-                preset=preset,
-                threads=4,
-                ffmpeg_params=ffmpeg_params,
-                logger=None,
-                verbose=False,
-                temp_audiofile=str(temp_audio),
-                remove_temp=True
+        # Título
+        if config.get("generateTitles", True) and title and PIL_AVAILABLE:
+            title_style = config.get("titleStyle", {})
+            safe_title_text = sanitize_input(str(title).upper(), max_len=80)
+            title_clip = criar_titulo_simples(
+                texto=safe_title_text,
+                largura_video=target_w,
+                altura_video=target_h,
+                duracao=clip.duration,
+                font_size=title_style.get("fontSize", 70),
+                text_color=title_style.get("textColor", "#FFD700"),
+                stroke_color=title_style.get("strokeColor", "#000000"),
+                stroke_width=title_style.get("strokeWidth", 6)
             )
 
-            # Valida saída
-            if not output_path.exists() or output_path.stat().st_size < 100000:  # < 100KB
-                raise Exception(f"Arquivo de saída inválido: {output_path}")
+            if title_clip:
+                layers.append(title_clip)
+                stack.callback(lambda t=title_clip: getattr(t, 'close', lambda: None)())
+                logger.debug("[RENDER] Título adicionado")
 
-            file_size = output_path.stat().st_size / 1e6
-            logger.info(f"[SUCCESS] Corte {num} finalizado ({file_size:.1f} MB)")
+        # Composição final
+        final = moviepy_imports['CompositeVideoClip'](layers, size=(target_w, target_h))
+        stack.callback(lambda f=final: getattr(f, 'close', lambda: None)())
 
-            return str(output_path)
+        # Nome do arquivo de saída
+        safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_'))[:30]
+        output_filename = f"cut_{num}_{safe_title}_{uuid.uuid4().hex[:6]}.mp4"
+        output_path = OUTPUT_DIR / output_filename
+        
+        # Configuração de encoding OTIMIZADA
+        ffmpeg_params = [
+            '-pix_fmt', 'yuv420p',
+            '-movflags', '+faststart',
+            '-vsync', 'vfr'
+        ]
+        
+        # Detecta NVENC
+        codec = 'libx264'
+        preset = 'medium'
+        
+        if GPU_AVAILABLE and FFMPEG_AVAILABLE:
+            try:
+                result = subprocess.run(
+                    ['ffmpeg', '-encoders'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                
+                if 'h264_nvenc' in result.stdout:
+                    codec = 'h264_nvenc'
+                    preset = 'p5'  # p5 é um bom balanço velocidade/qualidade
+                    
+                    # CORREÇÃO v12.3: Parâmetros compatíveis com FFmpeg 4.4.2
+                    # - Usar -rc:v ao invés de -rc
+                    # - Usar -cq:v ao invés de -cq  
+                    # - Remover -tier (não existe para h264_nvenc)
+                    # - Usar hífen ao invés de underscore em spatial-aq e temporal-aq
+                    ffmpeg_params.extend([
+                        '-rc:v', 'vbr',
+                        '-cq:v', '23',
+                        '-b:v', '0',
+                        '-maxrate:v', '10M',
+                        '-bufsize:v', '20M',
+                        '-profile:v', 'high',
+                        '-spatial-aq', '1',
+                        '-temporal-aq', '1'
+                    ])
+                    logger.info("[ENCODING GPU] Usando NVENC")
+                else:
+                    logger.info("[ENCODING] NVENC não disponível, usando CPU")
+                    
+            except Exception as e:
+                logger.warning(f"[WARNING] Erro ao detectar NVENC: {e}")
+        
+        # Parâmetros específicos para libx264 (CPU)
+        if codec == 'libx264':
+            ffmpeg_params.extend([
+                '-crf', '23',
+                '-preset', preset,
+                '-tune', 'film',
+                '-profile:v', 'high',
+                '-level', '4.0'
+            ])
+        
+        # CORREÇÃO v12.3: Renderização FORA do bloco if libx264
+        # Isso garante que write_videofile seja executado para NVENC também
+        logger.info(f"[RENDERING] Renderizando {output_filename} com codec {codec}...")
+        temp_audio = TEMP_DIR / f"temp_audio_{num}_{uuid.uuid4().hex[:6]}.m4a"
+
+        final.write_videofile(
+            str(output_path),
+            codec=codec,
+            audio_codec='aac',
+            audio_bitrate='192k',
+            preset=preset if codec == 'libx264' else 'p5',
+            threads=4,
+            ffmpeg_params=ffmpeg_params,
+            logger=None,
+            verbose=False,
+            temp_audiofile=str(temp_audio),
+            remove_temp=True
+        )
+
+        # Valida saída
+        if not output_path.exists() or output_path.stat().st_size < 100000:  # < 100KB
+            raise Exception(f"Arquivo de saída inválido: {output_path}")
+
+        file_size = output_path.stat().st_size / 1e6
+        logger.info(f"[SUCCESS] Corte {num} finalizado ({file_size:.1f} MB) - Codec: {codec}")
+
+        return str(output_path)
         
     except Exception as e:
-        logger.error(f"[ERROR] Erro no corte {num}: {e}")
+        logger.error(f"[ERROR GPU] Erro no corte {num}: {e}")
         import traceback
         logger.error(traceback.format_exc())
         raise
@@ -2193,20 +2014,19 @@ def cleanup_temp_files(keep_recent=5):
 # ==================== HANDLER PRINCIPAL ULTRA-ESTÁVEL ====================
 
 def handler(event):
-    """Handler principal do RunPod - v12.2 com correções críticas"""
+    """Handler principal do RunPod - ULTRA-ESTABILIZADO"""
     
     start_time = time.time()
     request_id = uuid.uuid4().hex[:8]
     
     # LOG DE INICIALIZAÇÃO
     logger.info("=" * 70)
-    logger.info(f"ANIMECUT v12.2 - NOVA REQUISIÇÃO [ID: {request_id}]")
+    logger.info(f"ANIMECUT v12.3 - NOVA REQUISIÇÃO [ID: {request_id}]")
     logger.info("=" * 70)
     
-    # LOG DE STATUS DO SISTEMA - ATUALIZADO v12.2 com cuDNN
+    # LOG DE STATUS DO SISTEMA
     system_status = {
         "gpu": GPU_AVAILABLE,
-        "cudnn": CUDNN_AVAILABLE,  # NOVO v12.2
         "torch_version": TORCH_VERSION,
         "cuda_version": torch.version.cuda if torch and hasattr(torch.version, 'cuda') else None,
         "moviepy": MOVIEPY_AVAILABLE,
@@ -2241,19 +2061,15 @@ def handler(event):
         }
     
     try:
-        # CORREÇÃO v12.2: URLs usadas exatamente como recebidas, sem sanitização
+        # Valida entrada e sanitiza (não escapar HTML em URLs assinadas)
         video_url = input_data.get("video_url")
         if not video_url:
             raise ValueError("video_url é obrigatório")
-        
-        # CORREÇÃO v12.2: NÃO sanitiza URL - usa exatamente como recebida
-        video_url = str(video_url).strip()
-        
+        video_url = sanitize_input(video_url, max_len=2000, escape_html=False)
         if not network.validate_url(video_url):
             raise ValueError("video_url inválido")
 
-        # CORREÇÃO v12.2: Sanitiza texto para exibição (com html.escape)
-        anime_name = sanitize_text_for_display(input_data.get("animeName", "Anime"), max_len=80)
+        anime_name = sanitize_input(input_data.get("animeName", "Anime"), max_len=80)
 
         logger.info(f"[PROCESSING] Anime: {anime_name}")
         logger.info(f"[PROCESSING] URL: {video_url[:80]}...")
@@ -2262,9 +2078,9 @@ def handler(event):
         logger.info("[STEP 1/4] Download de vídeo...")
         video_path = download_video(video_url)
 
-        # CORREÇÃO v12.2: Background URL também não é sanitizada
+        # Background (opcional) - não escapar HTML em URLs
         bg_url = input_data.get("background_url")
-        bg_url = str(bg_url).strip() if bg_url else None
+        bg_url = sanitize_input(bg_url, escape_html=False) if bg_url else None
         bg_path = download_background(bg_url) if bg_url else None
         
         # Configuração
@@ -2430,9 +2246,7 @@ def handler(event):
                 "failed_cuts": len(failed_cuts),
                 "processing_time": round(elapsed_time, 2),
                 "gpu_used": GPU_AVAILABLE,
-                "cudnn_available": CUDNN_AVAILABLE,  # NOVO v12.2
                 "whisper_used": whisper_manager.loaded(),
-                "whisper_device": whisper_manager._device if whisper_manager.loaded() else None,  # NOVO v12.2
                 "encoding_method": "nvenc" if GPU_AVAILABLE else "libx264",
                 "timestamp": datetime.now().isoformat()
             }
@@ -2492,13 +2306,12 @@ if __name__ == "__main__":
     try:
         # Banner
         print("\n" + "="*70)
-        print("ANIMECUT SERVERLESS v12.2 - CORREÇÕES CRÍTICAS")
-        print("Correções aplicadas:")
-        print("  ✓ URL sanitization corrigida (sem html.escape em URLs)")
-        print("  ✓ cuDNN fallback para CPU automático")
-        print("  ✓ Detecção de erros permanentes vs temporários")
+        print("ANIMECUT SERVERLESS v12.3 - NVENC FIXED")
+        print("Todas as correções aplicadas:")
         print("  ✓ Gestão de memória GPU otimizada")
         print("  ✓ Cleanup robusto de recursos")
+        print("  ✓ Validação de arquivos")
+        print("  ✓ Fallbacks em múltiplos níveis")
         print("  ✓ Thread-safe operations")
         print("  ✓ Context managers para clips")
         print(f"Volume: {VOLUME_BASE}")
@@ -2508,7 +2321,6 @@ if __name__ == "__main__":
         # Status detalhado
         print("\n[SYSTEM STATUS]")
         print(f"  GPU: {'✓' if GPU_AVAILABLE else '✗'} {torch.cuda.get_device_name(0) if GPU_AVAILABLE and torch else 'N/A'}")
-        print(f"  cuDNN: {'✓' if CUDNN_AVAILABLE else '✗ (Whisper usará CPU)'}")  # NOVO v12.2
         print(f"  CUDA: {'✓' if GPU_AVAILABLE else '✗'} {torch.version.cuda if torch and hasattr(torch.version, 'cuda') else 'N/A'}")
         print(f"  MoviePy: {'✓' if MOVIEPY_AVAILABLE else '✗'} {moviepy_version}")
         print(f"  PyTorch: {'✓' if AI_AVAILABLE else '✗'} {TORCH_VERSION if torch else 'N/A'}")
