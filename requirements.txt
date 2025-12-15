@@ -1,57 +1,53 @@
-# ============================================
-# AnimeCut Serverless - Requirements FIXED
-# Compatível com RunPod CUDA 12.1
-# ============================================
+# ✂️ AnimeCut Serverless v12 ULTIMATE Requirements
+# Este arquivo prioriza estabilidade e velocidade de build
 
-# CRÍTICO: NumPy DEVE ser 1.26.x para MoviePy v1.0.3
-# MoviePy v1.0.3 usa np.float/np.int removidos no NumPy 2.0
+# ==================== CORE ====================
+runpod>=1.6.0
+requests>=2.31.0
+tqdm>=4.66.4
+colorama
+
+# ==================== NUMPY SHIELD (CRÍTICO) ====================
+# Deve ser < 2.0 para compatibilidade com PyTorch e OpenCV atuais
 numpy==1.26.4
 
-# Dependências básicas
-runpod>=1.6.0
-boto3>=1.34.0
-requests>=2.31.0
-tqdm>=4.66.0
-colorama>=0.4.6
-protobuf>=4.25.0
-scipy>=1.11.0
-sentencepiece>=0.1.99
-
-# Processamento de vídeo e imagem
+# ==================== PROCESSAMENTO DE VÍDEO ====================
+# MoviePy v2 (Dev) para melhor performance e menos bugs com numpy novo
 moviepy==1.0.3
+imageio>=2.34.1
 imageio-ffmpeg>=0.5.1
-opencv-python-headless<=4.9.0.80
-Pillow>=10.0.0
-proglog>=0.1.10
-imageio>=2.31.0
+# OpenCV Headless para ambiente servidor
+opencv-python-headless>=4.9.0.80
 
-# Áudio
-librosa>=0.10.0
-soundfile>=0.12.0
-pydub>=0.25.1
+# ==================== IA & VISÃO (STACK TURBO) ====================
+# YOLO para Detecção de Rostos e Smart Crop
+ultralytics
 
-# IA/ML
-transformers>=4.36.0
-optimum>=1.15.0
-accelerate>=0.25.0
-einops>=0.7.0
-safetensors>=0.4.0
-peft>=0.7.0
+# Limpeza de Áudio Profissional
+deepfilternet
 
-# Whisper - CORRIGIDO para CUDA 12.1
-# onnxruntime-gpu 1.18+ tem builds para CUDA 12
-onnxruntime-gpu>=1.18.0
-faster-whisper>=0.10.0
-openai-whisper>=20231117
-# NOTA: insanely-fast-whisper comentado - conflitos CUDA 11/12
-# insanely-fast-whisper>=0.0.5
+# Transcrição Acelerada (Flash Attention requer GPU, aqui usamos fallback CPU-safe)
+# insanely-fast-whisper instala transformers e torch, cuidaremos para usar versões compatíveis
+insanely-fast-whisper
+faster-whisper
+transformers>=4.40.0
+accelerate>=0.30.0
+optimum
+scipy
+protobuf
+sentencepiece
 
-# Visão computacional
-ultralytics>=8.0.0
-pandas>=2.0.0
+# ==================== OUTROS ====================
+boto3>=1.34.0
+botocore>=1.34.0
+Pillow>=10.3.0
+soundfile>=0.12.1
+decorator<5.0
+librosa
 
-# Utilitários
-psutil>=5.9.0
-humanize>=4.8.0
-py-cpuinfo>=9.0.0
-nvidia-ml-py3>=7.352.0
+# Utilitários de compilação
+Cython<3
+basicsr>=1.4.2
+facexlib>=0.2.5
+gfpgan>=1.3.8
+realesrgan>=0.3.0
