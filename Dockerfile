@@ -2,10 +2,17 @@
 # CORREÇÕES: Bucket B2 (KortexClipAI2), download background melhorado
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
+# ==================== CACHE BUSTER ====================
+# IMPORTANTE: Mude este valor para forçar rebuild completo no RunPod
+# Formato: YYYYMMDD_HHMM ou qualquer string única
+ARG CACHEBUST=20251215_1230
+RUN echo "Build timestamp: ${CACHEBUST}" > /BUILD_INFO
+
 WORKDIR /app
 
 # Variáveis de Ambiente
-ENV BUILD_DATE="V12_7_B2_BACKGROUND"
+ENV BUILD_VERSION="12.7.1"
+ENV BUILD_DATE="2025-12-15T12:30:00Z"
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
@@ -111,12 +118,23 @@ RUN python3 -c "import ctranslate2; print(f'CTranslate2: {ctranslate2.__version_
 # Pré-carrega YOLO para evitar delays na primeira requisição
 RUN python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 
-# Copia handler
+# ==================== 14. HANDLER - SEMPRE ATUALIZADO ====================
+# Este ARG invalida o cache para SEMPRE copiar o handler mais recente
+ARG HANDLER_VERSION=12.7.1_20251215_1230
+RUN echo "Handler version: ${HANDLER_VERSION}"
+
+# Copia handler (NUNCA usa cache devido ao ARG acima)
 COPY handler.py .
+
+# Mostra versão no build log
+RUN echo "=== BUILD COMPLETO ===" && \
+    echo "Handler: ${HANDLER_VERSION}" && \
+    echo "Build: ${CACHEBUST}" && \
+    grep -o "v12\.[0-9]*" handler.py | head -1 || echo "Version check done"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD python3 -c "import sys; sys.exit(0)" || exit 1
 
-# Comando de entrada 
+# Comando de entrada
 CMD ["python3", "-u", "handler.py"]
