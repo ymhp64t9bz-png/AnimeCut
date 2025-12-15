@@ -1,11 +1,11 @@
-# ✂️ AnimeCut Serverless V12.2 - CUDA/cuDNN FIXED BUILD
-# CORREÇÃO: Instala cuDNN 9 para compatibilidade com faster-whisper/ctranslate2
+# ✂️ AnimeCut Serverless V12.3 - NVENC FIXED BUILD
+# CORREÇÃO: Parâmetros NVENC compatíveis com FFmpeg 4.4.2
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 WORKDIR /app
 
 # Variáveis de Ambiente
-ENV BUILD_DATE="V12_2_CUDNN9_FIX"
+ENV BUILD_DATE="V12_3_NVENC_FIX"
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
