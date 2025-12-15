@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AnimeCut Serverless v12.4 CLIP MANAGEMENT FIXED - TODOS OS BUGS CORRIGIDOS
+AnimeCut Serverless v12.5 ENCODING DEFINITIVO - TODOS OS BUGS CORRIGIDOS
 Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1
 CORREÇÕES: GPU estável, memória otimizada, cleanup robusto, fallbacks seguros
 """
@@ -1751,7 +1751,7 @@ def moviepy_clip_context(*clips):
 def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict) -> str:
     """Processa um corte individual OTIMIZADO PARA GPU com cleanup robusto
     
-    v12.4: Corrigido gerenciamento de clips MoviePy - sem ExitStack prematuro
+    v12.5: Encoding DEFINITIVO - NVENC simplificado + fallback libx264
     """
     
     # Lista para rastrear clips a serem fechados
@@ -1881,17 +1881,9 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
         output_filename = f"cut_{num}_{safe_title}_{uuid.uuid4().hex[:6]}.mp4"
         output_path = OUTPUT_DIR / output_filename
         
-        # Configuração de encoding OTIMIZADA
-        ffmpeg_params = [
-            '-pix_fmt', 'yuv420p',
-            '-movflags', '+faststart',
-            '-vsync', 'vfr'
-        ]
-        
-        # Detecta NVENC
-        codec = 'libx264'
-        preset = 'medium'
-        
+        # ==================== ENCODING v12.5 - DEFINITIVO ====================
+        # Detecta se NVENC está disponível
+        nvenc_available = False
         if GPU_AVAILABLE and FFMPEG_AVAILABLE:
             try:
                 result = subprocess.run(
@@ -1900,63 +1892,93 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
                     text=True,
                     timeout=5
                 )
+                nvenc_available = 'h264_nvenc' in result.stdout
+            except:
+                pass
+        
+        # Lista de codecs para tentar (NVENC primeiro se disponível, depois libx264)
+        codecs_to_try = []
+        if nvenc_available:
+            codecs_to_try.append('h264_nvenc')
+        codecs_to_try.append('libx264')
+        
+        encoding_success = False
+        last_error = None
+        
+        for codec in codecs_to_try:
+            try:
+                # Parâmetros base (sempre usados)
+                ffmpeg_params = [
+                    '-pix_fmt', 'yuv420p',
+                    '-movflags', '+faststart'
+                ]
                 
-                if 'h264_nvenc' in result.stdout:
-                    codec = 'h264_nvenc'
-                    preset = 'p5'  # p5 é um bom balanço velocidade/qualidade
-                    
-                    # CORREÇÃO v12.3: Parâmetros compatíveis com FFmpeg 4.4.2
+                if codec == 'h264_nvenc':
+                    # NVENC - parâmetros MÍNIMOS e SEGUROS para FFmpeg 4.4.2
+                    # NÃO usar: -rc, -rc:v, -cq, -cq:v, -spatial-aq, -temporal-aq
+                    # Esses parâmetros causam erros no FFmpeg 4.4.2
+                    preset = 'p4'
                     ffmpeg_params.extend([
-                        '-rc:v', 'vbr',
-                        '-cq:v', '23',
-                        '-b:v', '0',
-                        '-maxrate:v', '10M',
-                        '-bufsize:v', '20M',
-                        '-profile:v', 'high',
-                        '-spatial-aq', '1',
-                        '-temporal-aq', '1'
+                        '-b:v', '8M',
+                        '-maxrate', '12M',
+                        '-bufsize', '24M'
                     ])
-                    logger.info("[ENCODING GPU] Usando NVENC")
+                    logger.info(f"[ENCODING] Tentando NVENC (GPU)...")
                 else:
-                    logger.info("[ENCODING] NVENC não disponível, usando CPU")
+                    # libx264 - CPU encoding
+                    preset = 'medium'
+                    ffmpeg_params.extend([
+                        '-crf', '23',
+                        '-tune', 'film',
+                        '-profile:v', 'high',
+                        '-level', '4.0'
+                    ])
+                    logger.info(f"[ENCODING] Usando libx264 (CPU)...")
+                
+                logger.info(f"[RENDERING] {output_filename} com {codec}...")
+                temp_audio = TEMP_DIR / f"temp_audio_{num}_{uuid.uuid4().hex[:6]}.m4a"
+                
+                final.write_videofile(
+                    str(output_path),
+                    codec=codec,
+                    audio_codec='aac',
+                    audio_bitrate='192k',
+                    preset=preset,
+                    threads=4,
+                    ffmpeg_params=ffmpeg_params,
+                    logger=None,
+                    verbose=False,
+                    temp_audiofile=str(temp_audio),
+                    remove_temp=True
+                )
+                
+                # Valida saída
+                if output_path.exists() and output_path.stat().st_size > 100000:
+                    encoding_success = True
+                    file_size = output_path.stat().st_size / 1e6
+                    logger.info(f"[SUCCESS] Corte {num} finalizado ({file_size:.1f} MB) - Codec: {codec}")
+                    break
+                else:
+                    raise Exception("Arquivo de saída inválido ou muito pequeno")
                     
             except Exception as e:
-                logger.warning(f"[WARNING] Erro ao detectar NVENC: {e}")
+                last_error = e
+                logger.warning(f"[WARNING] Encoding com {codec} falhou: {str(e)[:100]}")
+                
+                # Limpa arquivo parcial
+                if output_path.exists():
+                    try:
+                        output_path.unlink()
+                    except:
+                        pass
+                
+                # Se há mais codecs para tentar, continua
+                if codec != codecs_to_try[-1]:
+                    logger.info("[FALLBACK] Tentando próximo codec...")
+                    continue
         
-        # Parâmetros específicos para libx264 (CPU)
-        if codec == 'libx264':
-            ffmpeg_params.extend([
-                '-crf', '23',
-                '-preset', preset,
-                '-tune', 'film',
-                '-profile:v', 'high',
-                '-level', '4.0'
-            ])
-        
-        # Renderiza
-        logger.info(f"[RENDERING] Renderizando {output_filename} com codec {codec}...")
-        temp_audio = TEMP_DIR / f"temp_audio_{num}_{uuid.uuid4().hex[:6]}.m4a"
-
-        final.write_videofile(
-            str(output_path),
-            codec=codec,
-            audio_codec='aac',
-            audio_bitrate='192k',
-            preset=preset if codec == 'libx264' else 'p5',
-            threads=4,
-            ffmpeg_params=ffmpeg_params,
-            logger=None,
-            verbose=False,
-            temp_audiofile=str(temp_audio),
-            remove_temp=True
-        )
-
-        # Valida saída
-        if not output_path.exists() or output_path.stat().st_size < 100000:  # < 100KB
-            raise Exception(f"Arquivo de saída inválido: {output_path}")
-
-        file_size = output_path.stat().st_size / 1e6
-        logger.info(f"[SUCCESS] Corte {num} finalizado ({file_size:.1f} MB) - Codec: {codec}")
+        if not encoding_success:
+            raise Exception(f"Encoding falhou com todos os codecs: {last_error}")
 
         return str(output_path)
         
@@ -2028,7 +2050,7 @@ def handler(event):
     
     # LOG DE INICIALIZAÇÃO
     logger.info("=" * 70)
-    logger.info(f"ANIMECUT v12.4 - NOVA REQUISIÇÃO [ID: {request_id}]")
+    logger.info(f"ANIMECUT v12.5 - NOVA REQUISIÇÃO [ID: {request_id}]")
     logger.info("=" * 70)
     
     # LOG DE STATUS DO SISTEMA
@@ -2313,7 +2335,7 @@ if __name__ == "__main__":
     try:
         # Banner
         print("\n" + "="*70)
-        print("ANIMECUT SERVERLESS v12.4 - CLIP MANAGEMENT FIXED")
+        print("ANIMECUT SERVERLESS v12.5 - ENCODING DEFINITIVO")
         print("Todas as correções aplicadas:")
         print("  ✓ Gestão de memória GPU otimizada")
         print("  ✓ Cleanup robusto de recursos")
