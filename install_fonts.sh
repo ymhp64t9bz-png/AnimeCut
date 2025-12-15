@@ -1,82 +1,111 @@
 #!/bin/bash
 # ============================================================
-# Script para instalar fontes no Volume do RunPod
-# AnimeCut v12.6
+# AnimeCut v12.6 - Instalador de Fontes do GitHub
+# Instala fontes em /workspace/fonts (Volume persistente)
+# 
+# USO:
+#   chmod +x install_fonts.sh
+#   ./install_fonts.sh
 # ============================================================
 
+set -e
+
+# Configurações
+GITHUB_REPO="https://github.com/ymhp64t9bz-png/AnimeCut.git"
+GITHUB_TOKEN="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"
 FONTS_DIR="/workspace/fonts"
-GITHUB_REPO="https://github.com/SEU_USUARIO/SEU_REPO/archive/refs/heads/main.zip"
+TEMP_DIR="/tmp/animecut_fonts_$$"
 
 echo "========================================"
-echo "AnimeCut - Instalador de Fontes"
+echo "AnimeCut - Instalador de Fontes v12.6"
 echo "========================================"
+echo ""
 
-# Cria diretório de fontes
+# Cria diretórios
 mkdir -p "$FONTS_DIR"
+mkdir -p "$TEMP_DIR"
 
-# Método 1: Se você tem as fontes em um repositório GitHub
-# Descomente e ajuste a URL abaixo:
-# echo "[1/3] Baixando fontes do GitHub..."
-# cd /tmp
-# wget -q "$GITHUB_REPO" -O fonts.zip
-# unzip -q fonts.zip -d fonts_temp
-# cp fonts_temp/*/fonts/*.ttf "$FONTS_DIR/" 2>/dev/null || true
-# cp fonts_temp/*/fonts/*.otf "$FONTS_DIR/" 2>/dev/null || true
-# rm -rf fonts.zip fonts_temp
+# Função de limpeza
+cleanup() {
+    echo "[CLEANUP] Removendo arquivos temporários..."
+    rm -rf "$TEMP_DIR"
+}
+trap cleanup EXIT
 
-# Método 2: Copiar fontes do sistema (fontes gratuitas)
-echo "[1/3] Copiando fontes do sistema..."
-cp /usr/share/fonts/truetype/dejavu/*.ttf "$FONTS_DIR/" 2>/dev/null || true
-cp /usr/share/fonts/truetype/liberation/*.ttf "$FONTS_DIR/" 2>/dev/null || true
+# Clone do repositório
+echo "[1/4] Clonando repositório do GitHub..."
+cd "$TEMP_DIR"
 
-# Método 3: Baixar fontes populares gratuitas
-echo "[2/3] Baixando fontes populares..."
+# Usa token para autenticação (repositório privado)
+REPO_URL="https://${GITHUB_TOKEN}@github.com/ymhp64t9bz-png/AnimeCut.git"
+git clone --depth 1 "$REPO_URL" repo 2>&1 | grep -v "ghp_" || {
+    echo "[INFO] Tentando clone público..."
+    git clone --depth 1 "$GITHUB_REPO" repo
+}
 
-# Roboto (Google Fonts - Licença Apache 2.0)
-if [ ! -f "$FONTS_DIR/Roboto-Bold.ttf" ]; then
-    echo "  - Baixando Roboto..."
-    wget -q "https://github.com/googlefonts/roboto/releases/download/v2.138/roboto-android.zip" -O /tmp/roboto.zip
-    unzip -q /tmp/roboto.zip -d /tmp/roboto
-    cp /tmp/roboto/*.ttf "$FONTS_DIR/" 2>/dev/null || true
-    rm -rf /tmp/roboto.zip /tmp/roboto
-fi
+echo "[2/4] Procurando fontes no repositório..."
 
-# Open Sans (Google Fonts - Licença Apache 2.0)  
-if [ ! -f "$FONTS_DIR/OpenSans-Bold.ttf" ]; then
-    echo "  - Baixando Open Sans..."
-    wget -q "https://fonts.google.com/download?family=Open%20Sans" -O /tmp/opensans.zip 2>/dev/null
-    if [ -f /tmp/opensans.zip ]; then
-        unzip -q /tmp/opensans.zip -d /tmp/opensans
-        cp /tmp/opensans/static/*.ttf "$FONTS_DIR/" 2>/dev/null || true
-        rm -rf /tmp/opensans.zip /tmp/opensans
-    fi
-fi
+# Entra no repositório
+cd repo
 
-# Montserrat (Google Fonts - OFL License)
-if [ ! -f "$FONTS_DIR/Montserrat-Bold.ttf" ]; then
-    echo "  - Baixando Montserrat..."
-    wget -q "https://fonts.google.com/download?family=Montserrat" -O /tmp/montserrat.zip 2>/dev/null
-    if [ -f /tmp/montserrat.zip ]; then
-        unzip -q /tmp/montserrat.zip -d /tmp/montserrat
-        cp /tmp/montserrat/static/*.ttf "$FONTS_DIR/" 2>/dev/null || true
-        rm -rf /tmp/montserrat.zip /tmp/montserrat
-    fi
-fi
-
-# Verificação
-echo "[3/3] Verificando fontes instaladas..."
+# Mostra fontes encontradas
 echo ""
-echo "Fontes em $FONTS_DIR:"
-ls -la "$FONTS_DIR"/*.ttf 2>/dev/null | wc -l | xargs echo "Total de fontes .ttf:"
-ls -la "$FONTS_DIR"/*.otf 2>/dev/null | wc -l | xargs echo "Total de fontes .otf:"
+echo "Fontes encontradas:"
+find . -type f \( -iname "*.ttf" -o -iname "*.otf" -o -iname "*.TTF" -o -iname "*.OTF" \) -exec basename {} \; | sort | uniq | while read font; do
+    echo "  ✓ $font"
+done
+
+echo ""
+echo "[3/4] Copiando fontes para $FONTS_DIR..."
+
+# Copia todas as fontes encontradas
+COPIED=0
+while IFS= read -r font; do
+    cp "$font" "$FONTS_DIR/" 2>/dev/null && ((COPIED++)) || true
+done < <(find . -type f \( -iname "*.ttf" -o -iname "*.otf" -o -iname "*.TTF" -o -iname "*.OTF" \))
+
+# Ajusta permissões
+chmod 644 "$FONTS_DIR"/*.ttf 2>/dev/null || true
+chmod 644 "$FONTS_DIR"/*.otf 2>/dev/null || true
+
+echo ""
+echo "[4/4] Verificando instalação..."
+echo ""
+
+# Lista fontes instaladas
+echo "========================================"
+echo "Fontes instaladas em $FONTS_DIR:"
+echo "========================================"
+
+if ls "$FONTS_DIR"/*.ttf "$FONTS_DIR"/*.otf 2>/dev/null | head -20; then
+    echo ""
+else
+    echo "(nenhuma fonte encontrada)"
+fi
+
+TTF_COUNT=$(ls -1 "$FONTS_DIR"/*.ttf 2>/dev/null | wc -l || echo "0")
+OTF_COUNT=$(ls -1 "$FONTS_DIR"/*.otf 2>/dev/null | wc -l || echo "0")
+TOTAL=$((TTF_COUNT + OTF_COUNT))
 
 echo ""
 echo "========================================"
-echo "Instalação concluída!"
-echo ""
-echo "Para usar fontes personalizadas:"
-echo "1. Faça upload das suas fontes .ttf ou .otf para:"
-echo "   $FONTS_DIR"
-echo ""
-echo "2. Reinicie o pod para que as fontes sejam detectadas"
+echo "RESUMO:"
+echo "  Fontes .ttf: $TTF_COUNT"
+echo "  Fontes .otf: $OTF_COUNT"
+echo "  Total: $TOTAL fontes"
 echo "========================================"
+echo ""
+
+if [ "$TOTAL" -gt 0 ]; then
+    echo "✅ Instalação concluída com sucesso!"
+    echo ""
+    echo "As fontes estão em: $FONTS_DIR"
+    echo "O AnimeCut detectará automaticamente na próxima execução."
+else
+    echo "⚠️  Nenhuma fonte foi encontrada no repositório."
+    echo ""
+    echo "Verifique se há arquivos .ttf ou .otf em:"
+    echo "  $GITHUB_REPO"
+fi
+
+echo ""
