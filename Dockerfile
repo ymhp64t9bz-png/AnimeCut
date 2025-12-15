@@ -118,5 +118,5 @@ COPY handler.py .
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD python3 -c "import sys; sys.exit(0)" || exit 1
 
-# Comando de entrada
+# Comando de entrada 
 CMD ["python3", "-u", "handler.py"]
