@@ -1,11 +1,11 @@
-# ✂️ AnimeCut Serverless V12.5 - ENCODING DEFINITIVO
-# CORREÇÃO: Parâmetros NVENC simplificados + fallback automático libx264
+# ✂️ AnimeCut Serverless V12.6 - B2 + FONTS + TITLES FIX
+# CORREÇÕES: Bucket B2 (KortexAI2), fontes do Volume, logs de títulos
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 WORKDIR /app
 
 # Variáveis de Ambiente
-ENV BUILD_DATE="V12_5_ENCODING_FIX"
+ENV BUILD_DATE="V12_6_B2_FONTS_TITLES"
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
