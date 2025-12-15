@@ -5,7 +5,7 @@ FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 # ==================== CACHE BUSTER ====================
 # IMPORTANTE: Mude este valor para forçar rebuild completo no RunPod
 # Formato: YYYYMMDD_HHMM ou qualquer string única
-ARG CACHEBUST=20251215_1230
+ARG CACHEBUST=20251215_1500
 RUN echo "Build timestamp: ${CACHEBUST}" > /BUILD_INFO
 
 WORKDIR /app
@@ -120,7 +120,37 @@ RUN python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 
 # ==================== 14. HANDLER - SEMPRE ATUALIZADO ====================
 # Este ARG invalida o cache para SEMPRE copiar o handler mais recente
-ARG HANDLER_VERSION=12.7.1_20251215_1230
+ARG HANDLER_VERSION=12.7.1_20251215_1500
+```
+
+**3. Faça commit e push para o GitHub**
+
+O RunPod vai detectar que esses valores mudaram e fazer um rebuild completo!
+
+---
+
+### 📋 CHECKLIST PARA DEPLOY
+
+Antes de fazer push para o GitHub, verifique:
+
+| Item | Valor Correto |
+|------|---------------|
+| `CACHEBUST` | Mude para data/hora atual |
+| `HANDLER_VERSION` | Mude para data/hora atual |
+| `B2_BUCKET` | `KortexClipAI2` ✅ |
+| `B2_KEY_ID` | `00568702c2cbfc60000000002` ✅ |
+
+---
+
+### 🔍 COMO VERIFICAR SE DEU CERTO
+
+Nos logs do RunPod, procure por:
+```
+╔═══════════════════════════════════════════════════════════════════╗
+║     ANIMECUT SERVERLESS v12.7.1 - BUILD 2025-12-15 12:30         ║
+╚═══════════════════════════════════════════════════════════════════╝
+...
+B2 Bucket: KortexClipAI2
 RUN echo "Handler version: ${HANDLER_VERSION}"
 
 # Copia handler (NUNCA usa cache devido ao ARG acima)
