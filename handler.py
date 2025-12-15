@@ -169,13 +169,20 @@ class ResourceManager:
 resource_manager = ResourceManager()
 
 # ------------------ FUNÇÕES DE SANITIZAÇÃO E VALIDAÇÃO DE PATH ------------------
-def sanitize_input(value: Optional[str], max_len: int = 240) -> str:
+def sanitize_input(value: Optional[str], max_len: int = 240, escape_html: bool = True) -> str:
+    """Sanitiza entradas de texto.
+
+    - Para URLs ou caminhos não chame com `escape_html=True` (padrão),
+      pois `html.escape` altera caracteres como '&' em URLs assinadas.
+    - Remove caracteres de controle, trima e limita tamanho.
+    """
     if not value:
         return ""
-    # Remove caracteres de controle, trims e escapa HTML para evitar injeções em logs
+    # Remove caracteres de controle e trims
     value = ''.join(ch for ch in str(value) if ch.isprintable())
     value = value.strip()
-    value = html.escape(value)
+    if escape_html:
+        value = html.escape(value)
     if len(value) > max_len:
         value = value[:max_len]
     return value
@@ -2050,11 +2057,11 @@ def handler(event):
         }
     
     try:
-        # Valida entrada e sanitiza
+        # Valida entrada e sanitiza (não escapar HTML em URLs assinadas)
         video_url = input_data.get("video_url")
         if not video_url:
             raise ValueError("video_url é obrigatório")
-        video_url = sanitize_input(video_url, max_len=2000)
+        video_url = sanitize_input(video_url, max_len=2000, escape_html=False)
         if not network.validate_url(video_url):
             raise ValueError("video_url inválido")
 
@@ -2067,8 +2074,9 @@ def handler(event):
         logger.info("[STEP 1/4] Download de vídeo...")
         video_path = download_video(video_url)
 
-        # Background (opcional)
-        bg_url = sanitize_input(input_data.get("background_url"))
+        # Background (opcional) - não escapar HTML em URLs
+        bg_url = input_data.get("background_url")
+        bg_url = sanitize_input(bg_url, escape_html=False) if bg_url else None
         bg_path = download_background(bg_url) if bg_url else None
         
         # Configuração
