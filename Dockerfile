@@ -1,11 +1,11 @@
-# ✂️ AnimeCut Serverless V12.4 - CLIP MANAGEMENT FIXED
-# CORREÇÃO: Gerenciamento de clips MoviePy sem ExitStack prematuro
+# ✂️ AnimeCut Serverless V12.5 - ENCODING DEFINITIVO
+# CORREÇÃO: Parâmetros NVENC simplificados + fallback automático libx264
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 WORKDIR /app
 
 # Variáveis de Ambiente
-ENV BUILD_DATE="V12_4_CLIP_FIX"
+ENV BUILD_DATE="V12_5_ENCODING_FIX"
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
