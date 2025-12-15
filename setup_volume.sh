@@ -2,7 +2,7 @@
 # ============================================================
 # AnimeCut v12.6 - Setup Inicial do Volume
 # Execute este script UMA VEZ ao configurar o pod
-#
+# 
 # O que este script faz:
 #   1. Instala fontes do GitHub em /workspace/fonts
 #   2. Cria estrutura de diretórios necessária
