@@ -1,5 +1,5 @@
-# ✂️ AnimeCut Serverless v12.2 - FIXED Requirements
-# CORREÇÃO: Versões compatíveis com cuDNN 9 e PyTorch 2.2.1+cu121
+# ✂️ AnimeCut Serverless v12.2 - LEGACY Requirements (cuDNN 8)
+# ALTERNATIVA: Versões antigas compatíveis com cuDNN 8.x
 
 # ==================== CORE ====================
 runpod>=1.6.0
@@ -8,7 +8,6 @@ tqdm>=4.66.4
 colorama
 
 # ==================== NUMPY SHIELD (CRÍTICO) ====================
-# Deve ser < 2.0 para compatibilidade com PyTorch e OpenCV
 numpy==1.26.4
 
 # ==================== PROCESSAMENTO DE VÍDEO ====================
@@ -18,15 +17,15 @@ imageio-ffmpeg>=0.5.1
 opencv-python-headless>=4.9.0.80
 proglog>=0.1.10
 
-# ==================== IA & VISÃO (STACK TURBO) ====================
+# ==================== IA & VISÃO ====================
 ultralytics
 deepfilternet
 
-# ==================== WHISPER & TRANSCRIÇÃO ====================
-# CRÍTICO: ctranslate2 >= 4.0 requer cuDNN 9.x
-# O Dockerfile DEVE instalar cuDNN 9 para estas versões funcionarem
-ctranslate2>=4.0.0
-faster-whisper>=1.0.0
+# ==================== WHISPER - VERSÕES LEGACY (cuDNN 8) ====================
+# ctranslate2 3.24.0 = última versão compatível com cuDNN 8
+# faster-whisper 0.10.1 = compatível com ctranslate2 3.x
+ctranslate2==3.24.0
+faster-whisper==0.10.1
 transformers>=4.40.0
 accelerate>=0.30.0
 optimum
@@ -52,4 +51,3 @@ realesrgan>=0.3.0
 # ==================== UTILITIES ====================
 "decorator<5.0"
 "Cython<3"
-
