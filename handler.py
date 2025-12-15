@@ -2443,18 +2443,20 @@ def safe_handler(event):
 
 if __name__ == "__main__":
     try:
-        # Banner
+        # Banner com versão detalhada
         print("\n" + "="*70)
-        print("ANIMECUT SERVERLESS v12.7 - B2 + BACKGROUND FIX")
-        print("Todas as correções aplicadas:")
-        print("  ✓ Gestão de memória GPU otimizada")
-        print("  ✓ Cleanup robusto de recursos")
-        print("  ✓ Validação de arquivos")
-        print("  ✓ Fallbacks em múltiplos níveis")
-        print("  ✓ Thread-safe operations")
-        print("  ✓ Context managers para clips")
+        print("╔═══════════════════════════════════════════════════════════════════╗")
+        print("║     ANIMECUT SERVERLESS v12.7.1 - BUILD 2025-12-15 12:30         ║")
+        print("╚═══════════════════════════════════════════════════════════════════╝")
+        print("Correções aplicadas:")
+        print("  ✓ Bucket B2: KortexClipAI2")
+        print("  ✓ Download de background melhorado")
+        print("  ✓ Fontes do volume /workspace/fonts")
+        print("  ✓ Títulos com logs detalhados")
+        print("  ✓ Fallback NVENC → libx264")
         print(f"Volume: {VOLUME_BASE}")
         print(f"Cache: {CACHE_DIR}")
+        print(f"B2 Bucket: {B2_BUCKET if B2_BUCKET else 'NÃO CONFIGURADO'}")
         print("="*70)
         
         # Status detalhado
