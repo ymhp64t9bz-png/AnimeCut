@@ -1,11 +1,11 @@
-# ✂️ AnimeCut Serverless V12.6 - B2 + FONTS + TITLES FIX
-# CORREÇÕES: Bucket B2 (KortexAI2), fontes do Volume, logs de títulos
+# ✂️ AnimeCut Serverless V12.7 - B2 + BACKGROUND FIX
+# CORREÇÕES: Bucket B2 (KortexClipAI2), download background melhorado
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 WORKDIR /app
 
 # Variáveis de Ambiente
-ENV BUILD_DATE="V12_6_B2_FONTS_TITLES"
+ENV BUILD_DATE="V12_7_B2_BACKGROUND"
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
