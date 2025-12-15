@@ -522,7 +522,7 @@ try:
         B2_KEY_ID = os.environ.get("B2_KEY_ID", "00568702c2cbfc60000000001")
         B2_APP_KEY = os.environ.get("B2_APPLICATION_KEY", "K005aP6cXPuBIw6IakBaMHYtXx4VGq")
         B2_ENDPOINT = os.environ.get("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
-        B2_BUCKET = os.environ.get("B2_BUCKET_NAME", "KortexAI")
+        B2_BUCKET = os.environ.get("B2_BUCKET_NAME", "KortexAI2")
         
         if B2_KEY_ID and B2_APP_KEY and B2_BUCKET:
             try:
