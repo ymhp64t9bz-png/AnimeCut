@@ -1000,109 +1000,121 @@ def download_video(url: str) -> str:
 def download_background(url: str) -> Optional[str]:
     """Download de background com cache e validação
     
-    v12.7: Suporte melhorado para URLs do Replit/Google Storage
+    v14.0: Melhor suporte para URLs de storage (B2, S3, Replit, etc)
     """
-    if not url or url.lower() == "none" or url.lower() == "null":
-        logger.info("[BACKGROUND] Nenhuma URL fornecida")
+    logger.info("=" * 50)
+    logger.info("[BACKGROUND v14] INICIANDO DOWNLOAD")
+    logger.info(f"  URL recebida: {url}")
+    logger.info("=" * 50)
+    
+    if not url:
+        logger.info("[BACKGROUND] URL vazia ou None")
         return None
     
     # Limpa a URL
-    url = url.strip()
+    url = str(url).strip()
     
-    if not network.validate_url(url):
-        logger.warning(f"[BACKGROUND] URL inválida: {url}")
+    # Verifica valores inválidos
+    if url.lower() in ["none", "null", "", "undefined"]:
+        logger.info(f"[BACKGROUND] URL inválida: '{url}'")
+        return None
+    
+    # Verifica se é uma URL válida
+    if not url.startswith(('http://', 'https://')):
+        logger.warning(f"[BACKGROUND] URL não começa com http/https: {url}")
         return None
     
     try:
-        logger.info(f"[BACKGROUND] Processando URL: {url[:100]}...")
+        logger.info(f"[BACKGROUND] Processando: {url[:100]}...")
         
         # Hash da URL para cache
         url_hash = hashlib.md5(url.encode()).hexdigest()[:16]
         
-        # Detecta extensão da URL ou usa .png como padrão
+        # Detecta extensão
         ext = ".png"
         url_lower = url.lower()
-        if ".jpg" in url_lower or ".jpeg" in url_lower:
+        if any(x in url_lower for x in [".jpg", ".jpeg"]):
             ext = ".jpg"
         elif ".webp" in url_lower:
             ext = ".webp"
         elif ".gif" in url_lower:
             ext = ".gif"
         
-        cache_file = CACHE_DIR / "backgrounds" / f"{url_hash}{ext}"
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Verifica cache
-        if cache_file.exists() and cache_file.stat().st_size > 1000:
-            logger.info(f"[BACKGROUND] Usando cache: {cache_file.name}")
-            temp_file = TEMP_DIR / f"bg_{url_hash}_{uuid.uuid4().hex[:6]}{ext}"
-            shutil.copy2(cache_file, temp_file)
-            resource_manager.register(temp_file, lambda p: p.unlink(missing_ok=True))
-            return str(temp_file)
-        
-        # Download com headers para evitar bloqueios
-        logger.info(f"[BACKGROUND] Baixando de: {url[:80]}...")
+        # Arquivo temporário
         temp_file = TEMP_DIR / f"bg_{url_hash}_{uuid.uuid4().hex[:6]}{ext}"
         
-        # Headers especiais para Replit/Google Storage
+        # Headers para evitar bloqueios
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'image/*,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Referer': url.split('/')[0] + '//' + url.split('/')[2] + '/' if len(url.split('/')) > 2 else ''
+            'Accept-Language': 'en-US,en;q=0.9'
         }
         
+        # Tenta download com requests
         try:
-            if network.download_with_retry(url, temp_file, headers=headers):
-                # Valida se é imagem
-                if not temp_file.exists():
-                    raise Exception("Arquivo não foi criado")
-                
-                file_size = temp_file.stat().st_size
-                if file_size < 1000:
-                    raise Exception(f"Arquivo muito pequeno: {file_size} bytes")
-                
-                logger.info(f"[BACKGROUND] Download OK: {file_size/1024:.1f} KB")
-                
-                # Salva no cache
-                try:
-                    shutil.copy2(temp_file, cache_file)
-                    logger.info(f"[BACKGROUND] Salvo no cache: {cache_file.name}")
-                except Exception as e:
-                    logger.warning(f"[BACKGROUND] Erro ao cachear: {e}")
-                
-                resource_manager.register(temp_file, lambda p: p.unlink(missing_ok=True))
-                return str(temp_file)
-                
-        except Exception as download_error:
-            logger.warning(f"[BACKGROUND] Erro no download: {download_error}")
+            import requests
+            logger.info(f"[BACKGROUND] Tentando requests.get...")
             
-            # Tenta download alternativo com requests direto
-            try:
-                import requests
-                logger.info("[BACKGROUND] Tentando download alternativo...")
-                
-                response = requests.get(url, headers=headers, timeout=30, stream=True)
-                response.raise_for_status()
-                
+            response = requests.get(url, headers=headers, timeout=60, stream=True, allow_redirects=True)
+            logger.info(f"[BACKGROUND] Status: {response.status_code}")
+            
+            if response.status_code == 200:
                 with open(temp_file, 'wb') as f:
                     for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
+                        if chunk:
+                            f.write(chunk)
                 
-                if temp_file.exists() and temp_file.stat().st_size > 1000:
-                    logger.info(f"[BACKGROUND] Download alternativo OK: {temp_file.stat().st_size/1024:.1f} KB")
-                    resource_manager.register(temp_file, lambda p: p.unlink(missing_ok=True))
-                    return str(temp_file)
+                if temp_file.exists():
+                    file_size = temp_file.stat().st_size
+                    logger.info(f"[BACKGROUND] Arquivo salvo: {file_size/1024:.1f} KB")
                     
-            except Exception as alt_error:
-                logger.warning(f"[BACKGROUND] Download alternativo falhou: {alt_error}")
+                    if file_size > 500:  # Pelo menos 500 bytes
+                        logger.info(f"[BACKGROUND] ✓ Download OK: {temp_file}")
+                        return str(temp_file)
+                    else:
+                        logger.warning(f"[BACKGROUND] Arquivo muito pequeno: {file_size} bytes")
+            else:
+                logger.warning(f"[BACKGROUND] HTTP {response.status_code}")
+                
+        except Exception as req_error:
+            logger.warning(f"[BACKGROUND] Erro requests: {req_error}")
+        
+        # Fallback: tenta com urllib
+        try:
+            import urllib.request
+            logger.info("[BACKGROUND] Tentando urllib...")
+            
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=60) as response:
+                with open(temp_file, 'wb') as f:
+                    f.write(response.read())
+            
+            if temp_file.exists() and temp_file.stat().st_size > 500:
+                logger.info(f"[BACKGROUND] ✓ Download via urllib OK: {temp_file}")
+                return str(temp_file)
+                
+        except Exception as urllib_error:
+            logger.warning(f"[BACKGROUND] Erro urllib: {urllib_error}")
+        
+        # Fallback: tenta com curl via subprocess
+        try:
+            logger.info("[BACKGROUND] Tentando curl...")
+            cmd = ['curl', '-L', '-o', str(temp_file), '-A', headers['User-Agent'], url]
+            result = subprocess.run(cmd, capture_output=True, timeout=60)
+            
+            if temp_file.exists() and temp_file.stat().st_size > 500:
+                logger.info(f"[BACKGROUND] ✓ Download via curl OK: {temp_file}")
+                return str(temp_file)
+                
+        except Exception as curl_error:
+            logger.warning(f"[BACKGROUND] Erro curl: {curl_error}")
             
     except Exception as e:
         logger.error(f"[BACKGROUND] Erro geral: {e}")
         import traceback
-        logger.debug(traceback.format_exc())
+        logger.error(traceback.format_exc())
     
-    logger.warning("[BACKGROUND] Todas as tentativas falharam")
+    logger.error("[BACKGROUND] ✗ TODAS AS TENTATIVAS FALHARAM")
     return None
 
 # ==================== SENSOR DE ADRENALINA OTIMIZADO ====================
@@ -1677,7 +1689,7 @@ def load_turbo_whisper_gpu():
 def transcrever_com_whisper_gpu(audio_path: str):
     return whisper_manager.transcribe(audio_path)
 
-# ==================== ANÁLISE DE VÍDEO COM IA GPU ULTRA-ROBUSTA ====================
+# ==================== ANÁLISE DE VÍDEO COM IA GPU v14.0 ====================
 
 @safe_gpu_operation
 def analyze_video_content_gpu(
@@ -1687,43 +1699,51 @@ def analyze_video_content_gpu(
     cut_duration: Dict = None
 ) -> List[Dict]:
     """
-    Analisa vídeo para encontrar cenas virais USANDO GPU com fallbacks
+    v14.0: ANÁLISE COMPLETA SEM LIMITE DE CORTES
     
-    v13.0: GERAÇÃO DE TÍTULOS INTELIGENTES BASEADOS NO CONTEÚDO
+    - Ouve e transcreve TODO o episódio
+    - Detecta TODAS as cenas de ação e diálogo importantes
+    - Gera TÍTULOS ÚNICOS baseados no conteúdo real de cada cena
+    - SEM LIMITE de cortes (gera quantos forem necessários)
+    - GARANTE que não há cortes duplicados
     
     Args:
         video_path: Caminho do vídeo
-        anime_name: Nome do anime
-        scene_preference: Foco da viralização ("balanced", "action", "dialogue", "humor")
-        cut_duration: Dict com {"min": X, "max": Y} para duração dos cortes
+        anime_name: Nome do anime (para contexto)
+        scene_preference: "balanced", "action", "dialogue", "humor"
+        cut_duration: {"min": X, "max": Y} em segundos
     """
     
     if cut_duration is None:
-        cut_duration = {"min": 15, "max": 60}
+        cut_duration = {"min": 30, "max": 90}
     
-    min_duration = cut_duration.get("min", 15)
-    max_duration = cut_duration.get("max", 60)
+    min_duration = max(15, cut_duration.get("min", 30))
+    max_duration = min(180, cut_duration.get("max", 90))
     
-    logger.info(f"[ANALYSIS v13] Preferência: {scene_preference}, Duração: {min_duration}-{max_duration}s")
-    logger.info(f"[ANALYSIS v13] Anime: {anime_name}")
+    logger.info("=" * 60)
+    logger.info("[ANÁLISE v14.0] INICIANDO ANÁLISE COMPLETA DO EPISÓDIO")
+    logger.info(f"  Anime: {anime_name}")
+    logger.info(f"  Preferência: {scene_preference}")
+    logger.info(f"  Duração dos cortes: {min_duration}s - {max_duration}s")
+    logger.info(f"  MODO: SEM LIMITE DE CORTES")
+    logger.info("=" * 60)
     
     if not AI_AVAILABLE or not WHISPER_AVAILABLE:
-        logger.info("[INFO] IA não disponível, usando heurística")
-        return generate_fallback_cuts(video_path, anime_name)
+        logger.warning("[WARNING] IA não disponível, usando análise básica")
+        return generate_smart_fallback_cuts(video_path, anime_name, min_duration, max_duration)
     
     audio_files_to_clean = []
     
     try:
-        # Carrega Whisper GPU se necessário
+        # ==================== ETAPA 1: CARREGAR WHISPER ====================
         if not whisper_manager.loaded():
-            logger.info("[WHISPER] Carregando Whisper sob demanda...")
+            logger.info("[WHISPER] Carregando modelo de transcrição...")
             if not load_turbo_whisper_gpu():
-                logger.error("[ERROR] Whisper GPU não pode ser carregado")
-                return generate_fallback_cuts(video_path, anime_name)
+                logger.error("[ERROR] Falha ao carregar Whisper")
+                return generate_smart_fallback_cuts(video_path, anime_name, min_duration, max_duration)
         
-        logger.info("[AUDIO GPU] Extraindo áudio...")
-        
-        # Extrai áudio com FFmpeg
+        # ==================== ETAPA 2: EXTRAIR ÁUDIO ====================
+        logger.info("[AUDIO] Extraindo áudio do episódio...")
         raw_audio = TEMP_DIR / f"audio_{uuid.uuid4().hex[:8]}.wav"
         audio_files_to_clean.append(raw_audio)
         
@@ -1735,399 +1755,373 @@ def analyze_video_content_gpu(
             '-hide_banner', '-loglevel', 'error'
         ]
         
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         
         if result.returncode != 0 or not validate_audio_file(raw_audio):
-            raise Exception(f"Falha na extração de áudio: {result.stderr[:200]}")
+            raise Exception(f"Falha na extração de áudio")
         
-        logger.info("[AUDIO] Processando áudio...")
+        logger.info("[AUDIO] Áudio extraído com sucesso")
+        
+        # ==================== ETAPA 3: LIMPAR ÁUDIO ====================
+        logger.info("[AUDIO] Processando e limpando áudio...")
         clean_audio = clean_audio_deepfilter(raw_audio)
         
         if clean_audio != raw_audio:
             audio_files_to_clean.append(clean_audio)
         
-        # Valida áudio limpo
         if not validate_audio_file(clean_audio):
-            raise Exception("Áudio processado é inválido")
+            clean_audio = raw_audio
         
-        # Transcrição COM GPU
-        logger.info("[TRANSCRIPTION GPU] Transcrevendo...")
-        result = transcrever_com_whisper_gpu(str(clean_audio))
+        # ==================== ETAPA 4: TRANSCREVER EPISÓDIO COMPLETO ====================
+        logger.info("[TRANSCRIÇÃO] Transcrevendo episódio completo...")
+        transcription_result = transcrever_com_whisper_gpu(str(clean_audio))
         
-        # Processa transcrição - GUARDA TEXTO COMPLETO PARA GERAR TÍTULOS
-        transcript = []
-        all_dialogue_text = []  # Para análise de contexto
-        
-        for seg in result.get("chunks", []):
+        # Processa todos os segmentos de transcrição
+        all_segments = []
+        for seg in transcription_result.get("chunks", []):
             text = seg.get("text", "").strip()
-            if text and len(text) > 2:
+            if text and len(text) > 3:
                 start, end = seg.get("timestamp", (0, 0))
-                confidence = seg.get("confidence", 0.0)
-                
-                transcript.append({
-                    "start": start,
-                    "end": end,
-                    "text": text,
-                    "type": "dialogue",
-                    "confidence": confidence
-                })
-                all_dialogue_text.append({"start": start, "end": end, "text": text})
+                if start is not None and end is not None and end > start:
+                    all_segments.append({
+                        "start": float(start),
+                        "end": float(end),
+                        "text": text,
+                        "type": "dialogue",
+                        "word_count": len(text.split()),
+                        "has_emotion": any(char in text for char in "!?...")
+                    })
         
-        logger.info(f"[TRANSCRIPTION] {len(transcript)} segmentos de diálogo")
+        logger.info(f"[TRANSCRIÇÃO] {len(all_segments)} segmentos de diálogo encontrados")
         
-        # Detecção de ação
-        logger.info("[ACTION ANALYSIS] Buscando cenas de ação...")
-        detector = ActionDetector(video_path)
-        action_scenes = detector.detect_high_energy_segments(threshold=60.0, min_duration=2.0)
+        # ==================== ETAPA 5: DETECTAR CENAS DE AÇÃO ====================
+        logger.info("[AÇÃO] Analisando cenas de ação...")
+        try:
+            detector = ActionDetector(video_path)
+            action_scenes = detector.detect_high_energy_segments(threshold=50.0, min_duration=3.0)
+            logger.info(f"[AÇÃO] {len(action_scenes)} cenas de ação detectadas")
+        except Exception as e:
+            logger.warning(f"[AÇÃO] Erro na detecção: {e}")
+            action_scenes = []
         
+        # ==================== ETAPA 6: OBTER DURAÇÃO DO VÍDEO ====================
+        try:
+            video = moviepy_imports['VideoFileClip'](video_path)
+            video_duration = video.duration
+            video.close()
+        except:
+            cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                   '-of', 'default=noprint_wrappers=1:nokey=1', video_path]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            video_duration = float(result.stdout.strip()) if result.returncode == 0 else 1200
+        
+        logger.info(f"[VÍDEO] Duração total: {video_duration:.1f}s ({video_duration/60:.1f} minutos)")
+        
+        # ==================== ETAPA 7: IDENTIFICAR MOMENTOS IMPORTANTES ====================
+        logger.info("[ANÁLISE] Identificando momentos importantes...")
+        
+        important_moments = []
+        
+        # Adiciona cenas de ação
         for action in action_scenes:
-            transcript.append({
+            important_moments.append({
                 "start": action["start"],
                 "end": action["end"],
-                "text": f"[CENA DE AÇÃO INTENSA]",
                 "type": "action",
-                "score": action["score"],
-                "duration": action.get("duration", 0)
+                "score": action.get("score", 70),
+                "text": "[CENA DE AÇÃO INTENSA]",
+                "title_hint": "action"
             })
         
-        logger.info(f"[ACTION ANALYSIS] {len(action_scenes)} cenas de ação detectadas")
-        
-        # Ordena por timestamp
-        transcript.sort(key=lambda x: x["start"])
-        
-        # Obtém duração do vídeo
-        if not MOVIEPY_AVAILABLE:
-            logger.warning("[WARNING] MoviePy não disponível, usando estimativa de duração")
-            duration = 300
-        else:
-            try:
-                video = moviepy_imports['VideoFileClip'](video_path)
-                duration = video.duration
-                video.close()
-            except Exception as e:
-                logger.warning(f"[WARNING] Erro ao obter duração: {e}")
-                duration = 300
-        
-        logger.info(f"[VIDEO] Duração total: {duration:.1f}s")
-        
-        # ==================== NOVA LÓGICA v13.0: CORTES DISTINTOS E TÍTULOS INTELIGENTES ====================
-        
-        # Separa itens por tipo
-        action_items = [t for t in transcript if t["type"] == "action"]
-        dialogue_items = [t for t in transcript if t["type"] == "dialogue"]
-        
-        # Filtra diálogos por qualidade
-        dialogue_items = [
-            d for d in dialogue_items
-            if len(d["text"].split()) > 3 and d.get("confidence", 0) > -1.0
-        ]
-        
-        logger.info(f"[ANALYSIS] Encontrados: {len(action_items)} ações, {len(dialogue_items)} diálogos")
-        
-        # Função para gerar título inteligente baseado no conteúdo
-        def generate_smart_title(item, index, anime_name, all_dialogues):
-            """Gera título baseado no conteúdo do segmento"""
+        # Adiciona diálogos importantes (frases longas ou emocionais)
+        for seg in all_segments:
+            importance_score = 0
             
-            # Se for ação, busca diálogo próximo para contexto
-            if item["type"] == "action":
-                # Busca diálogos próximos (até 10 segundos antes/depois)
-                nearby_dialogues = [
-                    d["text"] for d in all_dialogues
-                    if abs(d["start"] - item["start"]) < 15
-                ]
-                
-                if nearby_dialogues:
-                    # Pega as primeiras palavras mais impactantes
-                    combined = " ".join(nearby_dialogues[:2])
-                    words = combined.split()
-                    
-                    # Extrai frase curta e impactante
-                    if len(words) > 3:
-                        # Busca palavras-chave de anime
-                        keywords = ["poder", "força", "luta", "proteger", "amigo", "inimigo", 
-                                   "batalha", "morrer", "viver", "sonho", "fraco", "forte",
-                                   "matar", "salvar", "destruir", "acabar", "começar"]
-                        
-                        for word in words:
-                            if any(kw in word.lower() for kw in keywords):
-                                # Encontrou palavra impactante
-                                idx = words.index(word)
-                                start_idx = max(0, idx - 2)
-                                end_idx = min(len(words), idx + 3)
-                                title_phrase = " ".join(words[start_idx:end_idx])
-                                return f"{title_phrase.upper()}!"
-                        
-                        # Sem palavra-chave, usa início da frase
-                        title_phrase = " ".join(words[:4])
-                        return f"{title_phrase.upper()}..."
-                
-                # Fallback para ação sem diálogo
-                action_titles = [
-                    f"{anime_name} - MOMENTO ÉPICO",
-                    f"{anime_name} - BATALHA INTENSA",
-                    f"{anime_name} - CENA EXPLOSIVA"
-                ]
-                return action_titles[index % len(action_titles)]
+            # Frases mais longas são mais importantes
+            if seg["word_count"] >= 8:
+                importance_score += 30
+            elif seg["word_count"] >= 5:
+                importance_score += 20
             
-            else:
-                # Para diálogo, extrai frase impactante do texto
-                text = item["text"]
-                words = text.split()
-                
-                if len(words) >= 3:
-                    # Pega as primeiras palavras significativas
-                    title_words = words[:5]
-                    title_phrase = " ".join(title_words)
-                    
-                    # Remove pontuação final e adiciona reticências
-                    title_phrase = title_phrase.rstrip(".,!?")
-                    
-                    if len(title_phrase) > 30:
-                        title_phrase = title_phrase[:30] + "..."
-                    
-                    return title_phrase.upper()
-                
-                return f"{anime_name} - CENA {index + 1}"
+            # Frases com emoção
+            if seg["has_emotion"]:
+                importance_score += 25
+            
+            # Palavras-chave de anime
+            keywords = ["poder", "força", "luta", "proteger", "amigo", "inimigo", 
+                       "batalha", "morrer", "viver", "sonho", "nunca", "sempre",
+                       "promessa", "destino", "mundo", "coração", "alma"]
+            text_lower = seg["text"].lower()
+            keyword_count = sum(1 for kw in keywords if kw in text_lower)
+            importance_score += keyword_count * 15
+            
+            if importance_score >= 30:
+                important_moments.append({
+                    "start": seg["start"],
+                    "end": seg["end"],
+                    "type": "dialogue",
+                    "score": min(95, importance_score),
+                    "text": seg["text"],
+                    "title_hint": "dialogue"
+                })
         
-        # Agrupa segmentos próximos para evitar cortes sobrepostos
-        def cluster_segments(items, min_gap=30):
-            """Agrupa segmentos que estão muito próximos"""
-            if not items:
-                return []
-            
-            clusters = []
-            current_cluster = [items[0]]
-            
-            for item in items[1:]:
-                # Se o item está muito próximo do cluster atual, agrupa
-                if item["start"] - current_cluster[-1]["end"] < min_gap:
-                    current_cluster.append(item)
-                else:
-                    clusters.append(current_cluster)
-                    current_cluster = [item]
-            
-            clusters.append(current_cluster)
-            return clusters
+        # Ordena por score
+        important_moments.sort(key=lambda x: x["score"], reverse=True)
         
-        # Cria cortes garantindo que sejam de partes DIFERENTES do vídeo
+        logger.info(f"[ANÁLISE] {len(important_moments)} momentos importantes identificados")
+        
+        # ==================== ETAPA 8: FILTRAR POR PREFERÊNCIA ====================
+        if scene_preference == "action":
+            filtered_moments = [m for m in important_moments if m["type"] == "action"]
+            filtered_moments += [m for m in important_moments if m["type"] != "action"][:5]
+        elif scene_preference == "dialogue":
+            filtered_moments = [m for m in important_moments if m["type"] == "dialogue"]
+            filtered_moments += [m for m in important_moments if m["type"] != "dialogue"][:5]
+        elif scene_preference == "humor":
+            # Humor: frases curtas com emoção
+            filtered_moments = [m for m in important_moments 
+                               if m["type"] == "dialogue" and m.get("text", "").count("!") > 0]
+            filtered_moments += important_moments[:10]
+        else:  # balanced
+            filtered_moments = important_moments
+        
+        logger.info(f"[ANÁLISE] {len(filtered_moments)} momentos após filtro de preferência")
+        
+        # ==================== ETAPA 9: GERAR CORTES SEM LIMITE ====================
+        logger.info("[CORTES] Gerando cortes únicos...")
+        
         cuts = []
-        used_ranges = []  # Guarda os ranges já usados
+        used_ranges = []  # Para evitar duplicação
         
-        def is_overlapping(start, end, used):
-            """Verifica se o range sobrepõe algum já usado"""
-            for used_start, used_end in used:
-                # Verifica sobreposição com margem de 10 segundos
-                if not (end < used_start - 10 or start > used_end + 10):
+        def ranges_overlap(start1, end1, start2, end2, min_gap=10):
+            """Verifica se dois ranges se sobrepõem"""
+            return not (end1 + min_gap < start2 or end2 + min_gap < start1)
+        
+        def is_range_used(start, end):
+            """Verifica se o range já foi usado"""
+            for used_start, used_end in used_ranges:
+                if ranges_overlap(start, end, used_start, used_end):
                     return True
             return False
         
-        def get_best_items_for_preference(preference, action_items, dialogue_items):
-            """Retorna itens ordenados por preferência"""
-            if preference == "action":
-                return action_items + dialogue_items[:3]
-            elif preference == "dialogue":
-                return dialogue_items + action_items[:3]
-            elif preference == "humor":
-                # Para humor, pega diálogos mais curtos
-                sorted_dialogues = sorted(dialogue_items, key=lambda x: len(x["text"]))
-                return sorted_dialogues[:10] + action_items[:2]
-            else:  # balanced
-                # Alterna: ação, diálogo, ação, diálogo...
-                balanced = []
-                max_items = max(len(action_items), len(dialogue_items))
-                for i in range(max_items):
-                    if i < len(action_items):
-                        balanced.append(action_items[i])
-                    if i < len(dialogue_items):
-                        balanced.append(dialogue_items[i])
-                return balanced
-        
-        items_to_process = get_best_items_for_preference(
-            scene_preference, action_items, dialogue_items
-        )
-        
-        logger.info(f"[ANALYSIS] Processando {len(items_to_process)} candidatos para {scene_preference}")
-        
-        # Divide o vídeo em 3 partes para garantir cortes de diferentes momentos
-        video_thirds = [
-            (0, duration / 3),
-            (duration / 3, 2 * duration / 3),
-            (2 * duration / 3, duration)
-        ]
-        
-        # Tenta pegar um corte de cada terço do vídeo
-        for third_idx, (third_start, third_end) in enumerate(video_thirds):
-            if len(cuts) >= 3:
-                break
+        def extract_title_from_text(text, moment_type, index):
+            """Extrai título único baseado no texto do momento"""
+            if not text or text.startswith("["):
+                # Para ação ou texto vazio
+                action_titles = [
+                    "MOMENTO ÉPICO!",
+                    "BATALHA INTENSA!",
+                    "CENA EXPLOSIVA!",
+                    "CONFRONTO DECISIVO!",
+                    "PODER MÁXIMO!",
+                    "HORA DA VERDADE!",
+                    "DESPERTAR!",
+                    "LIMITE SUPERADO!"
+                ]
+                return action_titles[index % len(action_titles)]
             
-            # Filtra itens deste terço
-            third_items = [
-                item for item in items_to_process
-                if third_start <= item["start"] < third_end
-            ]
+            # Limpa e processa o texto
+            text = text.strip()
+            words = text.split()
             
-            if not third_items:
+            # Se for muito curto, usa como está
+            if len(words) <= 4:
+                title = text.upper().rstrip(".,")
+                if not title.endswith(("!", "?", "...")):
+                    title += "!"
+                return title
+            
+            # Extrai frase impactante (primeiras 4-6 palavras)
+            title_words = words[:5]
+            title = " ".join(title_words).upper()
+            
+            # Remove pontuação final e adiciona impacto
+            title = title.rstrip(".,;:")
+            if not title.endswith(("!", "?", "...")):
+                title += "..."
+            
+            return title
+        
+        # Processa cada momento importante
+        for idx, moment in enumerate(filtered_moments):
+            # Calcula tempos do corte
+            moment_duration = moment["end"] - moment["start"]
+            
+            # Expande para atingir duração mínima
+            if moment_duration < min_duration:
+                expand = (min_duration - moment_duration) / 2
+                start = max(0, moment["start"] - expand - 5)  # 5s de contexto antes
+                end = min(video_duration, moment["end"] + expand + 5)  # 5s de contexto depois
+            else:
+                start = max(0, moment["start"] - 3)
+                end = min(video_duration, moment["end"] + 3)
+            
+            # Ajusta para não exceder máximo
+            if end - start > max_duration:
+                center = (start + end) / 2
+                start = center - max_duration / 2
+                end = center + max_duration / 2
+            
+            # Garante que está dentro dos limites
+            start = max(0, start)
+            end = min(video_duration, end)
+            cut_duration_actual = end - start
+            
+            # Verifica duração válida
+            if cut_duration_actual < min_duration * 0.8:
                 continue
             
-            # Ordena por score/importância
-            third_items.sort(key=lambda x: x.get("score", 50), reverse=True)
+            # Verifica se não é duplicado
+            if is_range_used(start, end):
+                continue
             
-            for item in third_items:
-                if len(cuts) >= 3:
+            # Gera título único
+            title = extract_title_from_text(moment.get("text", ""), moment["type"], len(cuts))
+            
+            # Adiciona corte
+            cuts.append({
+                "start": round(start, 2),
+                "end": round(end, 2),
+                "title": title,
+                "score": moment["score"],
+                "type": moment["type"],
+                "duration": round(cut_duration_actual, 2),
+                "original_text": moment.get("text", "")[:100]
+            })
+            
+            used_ranges.append((start, end))
+            
+            logger.info(f"  [CORTE {len(cuts)}] {start:.1f}s-{end:.1f}s ({cut_duration_actual:.1f}s) - \"{title[:30]}...\"")
+        
+        # ==================== ETAPA 10: FALLBACK SE POUCOS CORTES ====================
+        if len(cuts) < 3:
+            logger.info("[FALLBACK] Poucos cortes encontrados, adicionando cortes adicionais...")
+            
+            # Divide o vídeo em segmentos e adiciona cortes de partes não usadas
+            segment_duration = max_duration
+            num_possible_segments = int(video_duration / segment_duration)
+            
+            for i in range(num_possible_segments):
+                if len(cuts) >= 10:  # Limite de segurança
                     break
                 
-                # Calcula tempos do corte
-                start = max(0, item["start"] - 3)
-                end = min(duration, item["end"] + 3)
-                clip_duration = end - start
+                seg_start = i * segment_duration
+                seg_end = min((i + 1) * segment_duration, video_duration)
                 
-                # Ajusta para respeitar min/max duration
-                if clip_duration < min_duration:
-                    expand = (min_duration - clip_duration) / 2
-                    start = max(0, start - expand)
-                    end = min(duration, end + expand)
-                    clip_duration = end - start
-                elif clip_duration > max_duration:
-                    center = (start + end) / 2
-                    start = max(third_start, center - max_duration / 2)
-                    end = min(third_end, center + max_duration / 2)
-                    clip_duration = end - start
-                
-                # Verifica se não sobrepõe cortes anteriores
-                if is_overlapping(start, end, used_ranges):
-                    logger.debug(f"[SKIP] Corte {start:.1f}-{end:.1f} sobrepõe corte anterior")
-                    continue
-                
-                # Verifica duração válida
-                if clip_duration < min_duration or clip_duration > max_duration:
-                    continue
-                
-                # Gera título inteligente
-                smart_title = generate_smart_title(item, len(cuts), anime_name, all_dialogue_text)
-                
-                cuts.append({
-                    "start": start,
-                    "end": end,
-                    "title": smart_title,
-                    "score": item.get("score", 70),
-                    "type": item["type"],
-                    "duration": clip_duration,
-                    "original_text": item.get("text", "")[:100]
-                })
-                
-                used_ranges.append((start, end))
-                logger.info(f"[CUT {len(cuts)}] {start:.1f}s-{end:.1f}s ({clip_duration:.1f}s) - '{smart_title[:30]}...'")
-                break  # Próximo terço
-        
-        # Se não conseguiu 3 cortes com a estratégia de terços, completa com fallback
-        if len(cuts) < 3:
-            logger.info(f"[FALLBACK] Apenas {len(cuts)} cortes encontrados, completando...")
-            
-            # Divide o vídeo restante em partes
-            remaining_needed = 3 - len(cuts)
-            available_duration = duration
-            
-            for i in range(remaining_needed):
-                # Encontra um ponto não usado
-                for attempt_start in range(0, int(duration), int(max_duration)):
-                    attempt_end = min(attempt_start + max_duration, duration)
+                if not is_range_used(seg_start, seg_end):
+                    # Busca diálogo neste segmento para gerar título
+                    segment_text = ""
+                    for seg in all_segments:
+                        if seg_start <= seg["start"] < seg_end:
+                            segment_text = seg["text"]
+                            break
                     
-                    if not is_overlapping(attempt_start, attempt_end, used_ranges):
-                        cuts.append({
-                            "start": attempt_start,
-                            "end": attempt_end,
-                            "title": f"{anime_name} - MOMENTO {len(cuts) + 1}",
-                            "score": 50,
-                            "type": "fallback",
-                            "duration": attempt_end - attempt_start
-                        })
-                        used_ranges.append((attempt_start, attempt_end))
-                        logger.info(f"[FALLBACK CUT] {attempt_start:.1f}s-{attempt_end:.1f}s")
-                        break
+                    title = extract_title_from_text(segment_text, "fallback", len(cuts))
+                    
+                    cuts.append({
+                        "start": round(seg_start, 2),
+                        "end": round(seg_end, 2),
+                        "title": title,
+                        "score": 50,
+                        "type": "segment",
+                        "duration": round(seg_end - seg_start, 2)
+                    })
+                    
+                    used_ranges.append((seg_start, seg_end))
+                    logger.info(f"  [CORTE ADICIONAL {len(cuts)}] {seg_start:.1f}s-{seg_end:.1f}s - \"{title[:30]}...\"")
         
-        logger.info(f"[ANALYSIS v13] {len(cuts)} cortes DISTINTOS gerados")
+        # ==================== RESULTADO FINAL ====================
+        logger.info("=" * 60)
+        logger.info(f"[RESULTADO] {len(cuts)} CORTES ÚNICOS GERADOS")
         for i, cut in enumerate(cuts):
-            logger.info(f"  [{i+1}] {cut['start']:.1f}s-{cut['end']:.1f}s: {cut['title'][:40]}")
+            logger.info(f"  [{i+1}] {cut['start']:.0f}s-{cut['end']:.0f}s: {cut['title'][:40]}")
+        logger.info("=" * 60)
         
         return cuts
         
     except Exception as e:
-        logger.error(f"[ERROR] Erro na análise v13: {e}")
+        logger.error(f"[ERROR] Erro na análise: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return generate_fallback_cuts(video_path, anime_name)
+        return generate_smart_fallback_cuts(video_path, anime_name, min_duration, max_duration)
     
     finally:
-        # Limpeza GARANTIDA de arquivos de áudio temporários
+        # Limpeza de arquivos temporários
         for audio_file in audio_files_to_clean:
             try:
                 if audio_file.exists():
                     audio_file.unlink()
-                    logger.debug(f"[CLEANUP] Removido: {audio_file.name}")
-            except Exception as e:
-                logger.warning(f"[CLEANUP] Erro ao remover {audio_file.name}: {e}")
-        
-        # Força coleta de lixo
+            except:
+                pass
         gc.collect()
 
-def generate_fallback_cuts(video_path: str, anime_name: str) -> List[Dict]:
-    """Gera cortes fallback simples e seguros"""
+
+def generate_smart_fallback_cuts(video_path: str, anime_name: str, min_duration: int = 30, max_duration: int = 90) -> List[Dict]:
+    """Gera cortes inteligentes quando IA não está disponível"""
     
     try:
+        # Obtém duração
         if MOVIEPY_AVAILABLE:
             video = moviepy_imports['VideoFileClip'](video_path)
             duration = video.duration
             video.close()
         else:
-            # Usa ffprobe para obter duração
-            cmd = [
-                'ffprobe', '-v', 'error',
-                '-show_entries', 'format=duration',
-                '-of', 'default=noprint_wrappers=1:nokey=1',
-                video_path
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            duration = float(result.stdout.strip()) if result.returncode == 0 else 300
+            cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                   '-of', 'default=noprint_wrappers=1:nokey=1', video_path]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            duration = float(result.stdout.strip()) if result.returncode == 0 else 1200
         
-        # Divide em até 3 partes
-        num_cuts = min(3, max(1, int(duration / 60)))
+        logger.info(f"[FALLBACK] Duração do vídeo: {duration:.1f}s")
+        
+        # Calcula número de cortes possíveis
+        target_duration = (min_duration + max_duration) / 2
+        num_cuts = max(3, int(duration / target_duration))
+        
         cuts = []
+        titles = [
+            "MOMENTO INCRÍVEL!",
+            "CENA ÉPICA!",
+            "CONFRONTO!",
+            "REVELAÇÃO!",
+            "DESPERTAR!",
+            "PODER MÁXIMO!",
+            "HORA DA VERDADE!",
+            "BATALHA DECISIVA!",
+            "O INÍCIO!",
+            "O CLÍMAX!"
+        ]
         
         for i in range(num_cuts):
-            part_duration = duration / num_cuts
-            start = i * part_duration
-            end = min((i + 1) * part_duration, duration)
+            start = i * target_duration
+            end = min((i + 1) * target_duration, duration)
             
-            # Ajusta para mínimo de 30 segundos
-            if end - start < 30:
-                end = start + 30
-                if end > duration:
-                    start = max(0, duration - 30)
-                    end = duration
-            
-            cuts.append({
-                "start": start,
-                "end": end,
-                "title": f"{anime_name} - Parte {i+1}",
-                "score": 50 - (i * 5),
-                "type": "fallback",
-                "duration": end - start
-            })
+            if end - start >= min_duration * 0.8:
+                cuts.append({
+                    "start": round(start, 2),
+                    "end": round(end, 2),
+                    "title": titles[i % len(titles)],
+                    "score": 60,
+                    "type": "fallback",
+                    "duration": round(end - start, 2)
+                })
         
-        logger.info(f"[FALLBACK] Gerados {len(cuts)} cortes simples")
+        logger.info(f"[FALLBACK] {len(cuts)} cortes gerados")
         return cuts
         
     except Exception as e:
-        logger.error(f"[ERROR] Erro no fallback: {e}")
-        # Fallback extremo
+        logger.error(f"[FALLBACK ERROR] {e}")
         return [{
-            "start": 30,
-            "end": 90,
-            "title": anime_name,
-            "score": 30,
+            "start": 0,
+            "end": 60,
+            "title": "MOMENTO ÉPICO!",
+            "score": 50,
             "type": "emergency",
             "duration": 60
         }]
+def generate_fallback_cuts(video_path: str, anime_name: str) -> List[Dict]:
+    """Wrapper para manter compatibilidade - usa a nova função"""
+    return generate_smart_fallback_cuts(video_path, anime_name, 30, 90)
+
 
 # ==================== PROCESSAMENTO DE CORTES GPU ULTRA-OTIMIZADO ====================
 
@@ -2148,7 +2142,7 @@ def moviepy_clip_context(*clips):
 def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict) -> str:
     """Processa um corte individual OTIMIZADO PARA GPU com cleanup robusto
     
-    v12.5: Encoding DEFINITIVO - NVENC simplificado + fallback libx264
+    v14.1: Títulos OBRIGATORIAMENTE personalizados baseados na transcrição
     """
     
     # Lista para rastrear clips a serem fechados
@@ -2157,9 +2151,38 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
     try:
         start = cut_data.get('start', 0)
         end = cut_data.get('end', start + 60)
-        title = cut_data.get('title', config.get('animeName', 'Anime'))
         
-        logger.info(f"[CUT {num}] {title} ({start:.1f}s - {end:.1f}s)")
+        # v14.1: Título OBRIGATÓRIO - nunca usa nome genérico do anime
+        # O título deve vir da análise de transcrição
+        title = cut_data.get('title')
+        
+        # Se não houver título personalizado, gera um baseado no tempo
+        if not title or title == config.get('animeName', 'Anime'):
+            # Gera título de emergência baseado no segmento
+            original_text = cut_data.get('original_text', '')
+            if original_text and len(original_text) > 5:
+                # Usa o texto original da transcrição
+                words = original_text.split()[:5]
+                title = " ".join(words).upper()
+                if not title.endswith(("!", "?", "...")):
+                    title += "..."
+                logger.info(f"[TITULO] Gerado do texto original: {title[:30]}")
+            else:
+                # Último recurso: título de impacto genérico (SEM nome do anime)
+                emergency_titles = [
+                    "MOMENTO ÉPICO!",
+                    "CENA INTENSA!",
+                    "REVELAÇÃO!",
+                    "CONFRONTO!",
+                    "DESPERTAR!",
+                    "HORA DA VERDADE!",
+                    "O LIMITE!",
+                    "EXPLOSÃO!"
+                ]
+                title = emergency_titles[num % len(emergency_titles)]
+                logger.warning(f"[TITULO] Usando título de emergência: {title}")
+        
+        logger.info(f"[CUT {num}] Título: '{title}' ({start:.1f}s - {end:.1f}s)")
         
         # Valida tempos
         if start < 0 or end <= start:
@@ -2625,14 +2648,17 @@ def handler(event):
             "titleStyle": title_style,
             "background_path": bg_path,
             
-            # v12.8 - Novos parâmetros
-            "frameMode": input_data.get("frameMode", "letterbox"),  # "letterbox" ou "fill"
-            "scenePreference": input_data.get("scenePreference", "balanced"),  # "balanced", "action", "dialogue", "humor"
+            # v14.1 - Parâmetros completos
+            "frameMode": input_data.get("frameMode", "letterbox"),
+            "scenePreference": input_data.get("scenePreference", "balanced"),
             "cutDuration": cut_duration,
             "antiShadowban": antishadowban_config,
             "audio": audio_config,
             
-            # Smart Crop (para implementação futura)
+            # v14.1: Número de cortes (0 = sem limite, IA decide)
+            "numberOfCuts": input_data.get("numberOfCuts", 0),
+            
+            # Smart Crop
             "smartCrop": input_data.get("smartCrop", {
                 "enabled": False,
                 "mode": "fixed",
@@ -2643,7 +2669,19 @@ def handler(event):
             "outputResolution": input_data.get("outputResolution", "1080p")
         }
         
-        logger.info(f"[CONFIG] {json.dumps(config, default=str)}")
+        # Log detalhado da configuração
+        logger.info("=" * 60)
+        logger.info("[CONFIG v14.1] PARÂMETROS RECEBIDOS:")
+        logger.info(f"  animeName: {anime_name}")
+        logger.info(f"  generateTitles: {config['generateTitles']}")
+        logger.info(f"  frameMode: {config['frameMode']}")
+        logger.info(f"  scenePreference: {config['scenePreference']}")
+        logger.info(f"  cutDuration: {cut_duration}")
+        logger.info(f"  numberOfCuts: {config['numberOfCuts']} (0 = sem limite)")
+        logger.info(f"  background_path: {bg_path}")
+        logger.info(f"  titleStyle: fontSize={title_style.get('fontSize')}, color={title_style.get('textColor')}, font={title_style.get('fontFamily')}")
+        logger.info(f"  antiShadowban: {antishadowban_config}")
+        logger.info("=" * 60)
         
         # 2. Análise e definição de cortes
         logger.info("[STEP 2/4] Análise de conteúdo...")
@@ -2676,15 +2714,15 @@ def handler(event):
             logger.info("[MODE] Fallback")
             cuts = generate_fallback_cuts(video_path, anime_name)
         
-        # Limite e validação de cortes
+        # Validação de cortes (SEM LIMITE - v14.0)
         cuts = [c for c in cuts if c.get("start", 0) >= 0 and c.get("end", 0) > c.get("start", 0)]
-        cuts = cuts[:3]  # Máximo 3
+        # v14.0: REMOVIDO LIMITE DE 3 CORTES - Gera quantos cortes a IA identificar
         
         if not cuts:
             logger.warning("[WARNING] Nenhum corte válido, usando fallback de emergência")
             cuts = generate_fallback_cuts(video_path, anime_name)
         
-        logger.info(f"[CUTS] {len(cuts)} cortes para processar")
+        logger.info(f"[CUTS v14] {len(cuts)} cortes para processar (SEM LIMITE)")
         
         # 3. Processamento dos cortes
         logger.info("[STEP 3/4] Processamento de cortes...")
@@ -2878,17 +2916,16 @@ if __name__ == "__main__":
         # Banner com versão detalhada
         print("\n" + "="*70)
         print("╔═══════════════════════════════════════════════════════════════════╗")
-        print("║   ANIMECUT SERVERLESS v13.0 - BUILD 2025-12-17 04:00             ║")
-        print("║   TÍTULOS IA + CORTES DISTINTOS + MOLDURA                        ║")
+        print("║   ANIMECUT SERVERLESS v14.1 - BUILD 2025-12-17 07:00             ║")
+        print("║   TÍTULOS TRANSCRIÇÃO + SEM LIMITE + PARÂMETROS COMPLETOS        ║")
         print("╚═══════════════════════════════════════════════════════════════════╝")
-        print("Novidades v13.0:")
-        print("  ✓ TÍTULOS INTELIGENTES: Gerados pela IA baseados no conteúdo")
-        print("  ✓ CORTES DISTINTOS: Garantia de cenas diferentes (não duplicadas)")
-        print("  ✓ CORTE MOLDURA: Mantém 16:9 centralizado sobre 9:16")
-        print("  ✓ ANÁLISE COMPLETA: Transcrição + Detecção de ação")
-        print("  ✓ Foco de viralização (ação/diálogo/humor/balanceado)")
-        print("  ✓ Anti-shadowban com controles individuais")
-        print("  ✓ Bucket B2: KortexClipAI2 (FORÇADO)")
+        print("Novidades v14.1:")
+        print("  ✓ TÍTULOS DA TRANSCRIÇÃO: Baseados no diálogo real de cada cena")
+        print("  ✓ SEM LIMITE DE CORTES: IA decide quantos cortes gerar")
+        print("  ✓ CORTES NÃO DUPLICADOS: Verificação de sobreposição")
+        print("  ✓ BACKGROUND FIX: Múltiplas tentativas (requests, urllib, curl)")
+        print("  ✓ PARÂMETROS APLICADOS: Fonte, cor, posição, anti-shadowban")
+        print("  ✓ CORTE MOLDURA: 16:9 centralizado sobre 9:16")
         print(f"Volume: {VOLUME_BASE}")
         print(f"Cache: {CACHE_DIR}")
         print(f"B2 Bucket: {B2_BUCKET if B2_BUCKET else 'NÃO CONFIGURADO'}")
