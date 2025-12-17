@@ -3,7 +3,7 @@
 """
 AnimeCut Serverless v12.7.3 FORCE B2 BUCKET
 BUILD: 2025-12-16 14:00 - IGNORA ENV ANTIGA
-Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1 
+Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1
 CORREÇÕES: Força KortexClipAI2 mesmo com variável ambiente errada
 """
 
@@ -1409,17 +1409,7 @@ def criar_titulo_simples(
     """
     Renderiza título simples com validação robusta
     
-    Args:
-        texto: Texto do título
-        largura_video: Largura do vídeo em pixels
-        altura_video: Altura do vídeo em pixels
-        duracao: Duração do título em segundos
-        font_size: Tamanho da fonte em pixels
-        text_color: Cor do texto em HEX (#FFFFFF)
-        stroke_color: Cor da borda em HEX (#000000)
-        stroke_width: Espessura da borda em pixels
-        pos_vertical: Posição vertical como fração (0.0 = topo, 1.0 = base)
-        font_family: Nome da fonte (procura em /workspace/fonts)
+    v14.2: Logs detalhados + Correção de tamanho de fonte
     """
     if not PIL_AVAILABLE:
         logger.warning("[WARNING] PIL não disponível para criar título")
@@ -1430,16 +1420,42 @@ def criar_titulo_simples(
         return None
     
     try:
+        # ========== LOG DE DIAGNÓSTICO ==========
+        logger.info("=" * 60)
+        logger.info("[TITULO v14.2] CRIANDO TÍTULO")
+        logger.info(f"  Texto: '{texto[:50]}'")
+        logger.info(f"  font_size RECEBIDO: {font_size} (tipo: {type(font_size).__name__})")
+        logger.info(f"  text_color: {text_color}")
+        logger.info(f"  stroke_color: {stroke_color}")
+        logger.info(f"  stroke_width: {stroke_width}")
+        logger.info(f"  pos_vertical: {pos_vertical}")
+        logger.info(f"  font_family: {font_family}")
+        logger.info("=" * 60)
+        
         # Valida parâmetros
         if not texto or len(texto.strip()) == 0:
+            logger.warning("[TITULO] Texto vazio!")
             return None
         
         if largura_video <= 0 or altura_video <= 0 or duracao <= 0:
             logger.warning("[WARNING] Parâmetros de vídeo inválidos para título")
             return None
         
-        # Cria imagem para o texto
-        img_h = max(100, int(altura_video * 0.3))
+        # GARANTE que font_size é um inteiro válido
+        original_font_size = font_size
+        if isinstance(font_size, str):
+            try:
+                font_size = int(float(font_size))
+                logger.info(f"[TITULO] Convertido font_size de string para int: {font_size}")
+            except:
+                font_size = 80
+                logger.warning(f"[TITULO] font_size inválido '{original_font_size}', usando 80")
+        
+        font_size = max(30, min(300, int(font_size)))  # Entre 30 e 300 pixels
+        logger.info(f"[TITULO] font_size FINAL: {font_size}")
+        
+        # Cria imagem para o texto - altura proporcional ao tamanho da fonte
+        img_h = max(font_size * 4, int(altura_video * 0.4))
         img = Image.new('RGBA', (largura_video, img_h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
         
@@ -1452,11 +1468,14 @@ def criar_titulo_simples(
             fonts_dir = Path("/workspace/fonts")
             possible_extensions = ['.ttf', '.otf', '.TTF', '.OTF']
             
+            logger.info(f"[TITULO] Procurando fonte '{font_family}' em {fonts_dir}")
+            
             # Procura pelo nome exato
             for ext in possible_extensions:
                 candidate = fonts_dir / f"{font_family}{ext}"
                 if candidate.exists():
                     font_path = str(candidate)
+                    logger.info(f"[TITULO] ✓ Fonte encontrada: {font_path}")
                     break
             
             # Se não encontrou, procura case-insensitive
@@ -1464,31 +1483,54 @@ def criar_titulo_simples(
                 for f in fonts_dir.iterdir():
                     if f.stem.lower() == font_family.lower() and f.suffix.lower() in ['.ttf', '.otf']:
                         font_path = str(f)
+                        logger.info(f"[TITULO] ✓ Fonte encontrada (case-insensitive): {font_path}")
                         break
             
-            if font_path:
-                logger.info(f"[TITULO] Usando fonte customizada: {font_path}")
+            if not font_path:
+                logger.warning(f"[TITULO] ✗ Fonte '{font_family}' NÃO encontrada")
+                if fonts_dir.exists():
+                    available = [f.name for f in fonts_dir.iterdir() if f.suffix.lower() in ['.ttf', '.otf']]
+                    logger.info(f"[TITULO] Fontes disponíveis: {available[:5]}")
         
         # Se não encontrou fonte customizada, usa FONT_TO_USE padrão
         if not font_path and FONT_TO_USE and os.path.exists(FONT_TO_USE):
             font_path = FONT_TO_USE
+            logger.info(f"[TITULO] Usando fonte padrão: {font_path}")
         
-        # Carrega a fonte
+        # Carrega a fonte COM O TAMANHO CORRETO
         if font_path:
             try:
                 font = ImageFont.truetype(font_path, font_size)
-                logger.debug(f"[TITULO] Fonte carregada: {font_path}")
+                logger.info(f"[TITULO] ✓ Fonte carregada: {font_path} tamanho={font_size}")
             except Exception as e:
                 logger.warning(f"[WARNING] Erro ao carregar fonte {font_path}: {e}")
         
+        # Se não conseguiu carregar fonte, tenta fallbacks do sistema
         if font is None:
-            # Fonte padrão
+            fallback_fonts = [
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+                "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"
+            ]
+            
+            for fb_font in fallback_fonts:
+                if os.path.exists(fb_font):
+                    try:
+                        font = ImageFont.truetype(fb_font, font_size)
+                        logger.info(f"[TITULO] Usando fonte fallback: {fb_font} tamanho={font_size}")
+                        break
+                    except:
+                        continue
+        
+        # Último recurso: fonte padrão PIL (mas MANTÉM tamanho grande simulado)
+        if font is None:
             try:
                 font = ImageFont.load_default()
-                font_size = 20  # Ajusta tamanho para fonte padrão
-                logger.warning("[WARNING] Usando fonte padrão do sistema")
+                # NÃO reduz o tamanho! Apenas loga warning
+                logger.warning(f"[TITULO] ⚠ Usando fonte padrão PIL - tamanho visual pode variar")
             except:
-                logger.warning("[WARNING] Não foi possível carregar fonte padrão")
+                logger.error("[TITULO] ✗ Não foi possível carregar NENHUMA fonte!")
                 return None
         
         # Divide texto em linhas inteligentemente
@@ -1519,9 +1561,11 @@ def criar_titulo_simples(
         text_rgb = hex_to_rgb(text_color)
         stroke_rgb = hex_to_rgb(stroke_color)
         
+        logger.info(f"[TITULO] Cores: texto={text_rgb}, borda={stroke_rgb}")
+        
         # Desenha texto
         y_pos = 20
-        line_spacing = font_size + 10
+        line_spacing = font_size + 15
         
         for linha in linhas:
             if not linha.strip():
@@ -1567,11 +1611,13 @@ def criar_titulo_simples(
         pos_y = max(0, min(altura_video - img_h, int(altura_video * pos_vertical)))
         clip = clip.set_position(('center', pos_y))
         
-        logger.info(f"[TITULO] Criado: '{texto[:30]}...' ({len(linhas)} linhas)")
+        logger.info(f"[TITULO] ✓ Criado com sucesso: '{texto[:30]}' ({len(linhas)} linhas, tamanho={font_size})")
         return clip
         
     except Exception as e:
-        logger.warning(f"[WARNING] Erro ao criar título: {e}")
+        logger.error(f"[TITULO] ✗ Erro ao criar título: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return None
 
 # ==================== WHISPER GPU ULTRA-ESTABILIZADO (MANAGER THREAD-SAFE) ====================
@@ -1905,7 +1951,7 @@ def analyze_video_content_gpu(
             return False
         
         def extract_title_from_text(text, moment_type, index):
-            """Extrai título único baseado no texto do momento"""
+            """Extrai título único baseado no texto do momento - SEM RETICÊNCIAS"""
             if not text or text.startswith("["):
                 # Para ação ou texto vazio
                 action_titles = [
@@ -1926,19 +1972,17 @@ def analyze_video_content_gpu(
             
             # Se for muito curto, usa como está
             if len(words) <= 4:
-                title = text.upper().rstrip(".,")
-                if not title.endswith(("!", "?", "...")):
-                    title += "!"
+                title = text.upper().rstrip(".,;:!?")
+                title += "!"  # Sempre termina com exclamação
                 return title
             
             # Extrai frase impactante (primeiras 4-6 palavras)
             title_words = words[:5]
             title = " ".join(title_words).upper()
             
-            # Remove pontuação final e adiciona impacto
-            title = title.rstrip(".,;:")
-            if not title.endswith(("!", "?", "...")):
-                title += "..."
+            # Remove pontuação final e adiciona exclamação (NUNCA reticências)
+            title = title.rstrip(".,;:!?")
+            title += "!"  # Sempre termina com exclamação
             
             return title
         
@@ -2164,8 +2208,7 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
                 # Usa o texto original da transcrição
                 words = original_text.split()[:5]
                 title = " ".join(words).upper()
-                if not title.endswith(("!", "?", "...")):
-                    title += "..."
+                title = title.rstrip(".,;:!?") + "!"  # Sempre exclamação, NUNCA reticências
                 logger.info(f"[TITULO] Gerado do texto original: {title[:30]}")
             else:
                 # Último recurso: título de impacto genérico (SEM nome do anime)
@@ -2916,15 +2959,14 @@ if __name__ == "__main__":
         # Banner com versão detalhada
         print("\n" + "="*70)
         print("╔═══════════════════════════════════════════════════════════════════╗")
-        print("║   ANIMECUT SERVERLESS v14.1 - BUILD 2025-12-17 07:00             ║")
-        print("║   TÍTULOS TRANSCRIÇÃO + SEM LIMITE + PARÂMETROS COMPLETOS        ║")
+        print("║   ANIMECUT SERVERLESS v14.2 - BUILD 2025-12-17 08:00             ║")
+        print("║   TÍTULOS SEM RETICÊNCIAS + FONTE GRANDE + BG DIAGNÓSTICO        ║")
         print("╚═══════════════════════════════════════════════════════════════════╝")
-        print("Novidades v14.1:")
-        print("  ✓ TÍTULOS DA TRANSCRIÇÃO: Baseados no diálogo real de cada cena")
+        print("Novidades v14.2:")
+        print("  ✓ TÍTULOS SEM RETICÊNCIAS: Sempre termina com '!' (exclamação)")
+        print("  ✓ TAMANHO DE FONTE: Agora aplica corretamente o tamanho escolhido")
+        print("  ✓ LOGS DE DIAGNÓSTICO: Mostra parâmetros recebidos")
         print("  ✓ SEM LIMITE DE CORTES: IA decide quantos cortes gerar")
-        print("  ✓ CORTES NÃO DUPLICADOS: Verificação de sobreposição")
-        print("  ✓ BACKGROUND FIX: Múltiplas tentativas (requests, urllib, curl)")
-        print("  ✓ PARÂMETROS APLICADOS: Fonte, cor, posição, anti-shadowban")
         print("  ✓ CORTE MOLDURA: 16:9 centralizado sobre 9:16")
         print(f"Volume: {VOLUME_BASE}")
         print(f"Cache: {CACHE_DIR}")
