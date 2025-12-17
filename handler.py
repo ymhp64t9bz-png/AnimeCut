@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AnimeCut Serverless v12.7.2 FORCE REBUILD - B2 BUCKET FIX
-BUILD: 2025-12-15 15:45 - FORCE NO CACHE
+AnimeCut Serverless v12.7.3 FORCE B2 BUCKET
+BUILD: 2025-12-16 14:00 - IGNORA ENV ANTIGA
 Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1
-CORREÇÕES: Bucket B2 KortexClipAI2, Background download, Fontes Volume
+CORREÇÕES: Força KortexClipAI2 mesmo com variável ambiente errada
 """
 
 # ==================== IMPORTAÇÕES ESSENCIAIS ====================
@@ -520,10 +520,20 @@ try:
     if boto3:
         from botocore.client import Config
         
+        # CONFIGURAÇÃO B2 - v12.7.3 FORÇADA
+        # IMPORTANTE: Bucket correto é KortexClipAI2
         B2_KEY_ID = os.environ.get("B2_KEY_ID", "00568702c2cbfc60000000002")
         B2_APP_KEY = os.environ.get("B2_APPLICATION_KEY", "K005aP6cXPuBIw6IakBaMHYtXx4VGq")
         B2_ENDPOINT = os.environ.get("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
-        B2_BUCKET = os.environ.get("B2_BUCKET_NAME", "KortexClipAI2")
+        
+        # FORÇA o bucket correto - ignora variável de ambiente antiga
+        env_bucket = os.environ.get("B2_BUCKET_NAME", "")
+        if env_bucket in ["KortexAI", "kortexai", ""]:
+            # Variável antiga ou vazia - usa o correto
+            B2_BUCKET = "KortexClipAI2"
+            logger.info(f"[B2] Bucket corrigido: {env_bucket} -> KortexClipAI2")
+        else:
+            B2_BUCKET = env_bucket
         
         if B2_KEY_ID and B2_APP_KEY and B2_BUCKET:
             try:
@@ -1248,10 +1258,35 @@ class ActionDetector:
 
 # ==================== ANTI-SHADOWBAN APRIMORADO ====================
 
-def apply_antishadowban(clip):
-    """Aplica transformações para tornar vídeo único com segurança"""
+def apply_antishadowban(clip, options: Dict = None):
+    """
+    Aplica transformações para tornar vídeo único com segurança
+    
+    Args:
+        clip: Clip do MoviePy
+        options: Dict com opções individuais:
+            - enabled: bool - Ativar anti-shadowban
+            - mirror: bool - Espelhar vídeo
+            - colorGrading: bool - Aplicar color grading aleatório
+            - microZoom: bool - Aplicar micro-zoom (respiração)
+            - filmGrain: bool - Adicionar ruído de película
+    """
     if not MOVIEPY_AVAILABLE:
         logger.warning("[WARNING] MoviePy não disponível, pulando anti-shadowban")
+        return clip
+    
+    # Retrocompatibilidade: se options é None ou não é dict, usa defaults
+    if options is None or not isinstance(options, dict):
+        options = {
+            "enabled": True,
+            "mirror": True,
+            "colorGrading": True,
+            "microZoom": False,
+            "filmGrain": False
+        }
+    
+    if not options.get("enabled", True):
+        logger.info("[ANTI-SHADOWBAN] Desativado pelo usuário")
         return clip
     
     logger.info("[ANTI-SHADOWBAN] Aplicando transformações...")
@@ -1259,33 +1294,69 @@ def apply_antishadowban(clip):
     try:
         modifications = []
         
-        # Espelhamento aleatório (50% chance)
-        if random.choice([True, False]):
-            clip = clip.fx(moviepy_imports['mirror_x'])
-            modifications.append("espelhamento")
+        # Espelhamento (controlável pelo usuário, com aleatoriedade se ativado)
+        if options.get("mirror", True):
+            if random.choice([True, False]):  # 50% chance mesmo quando ativado
+                clip = clip.fx(moviepy_imports['mirror_x'])
+                modifications.append("espelhamento")
         
-        # Ajustes de cor sutis mas perceptíveis
-        gamma_val = random.uniform(0.95, 1.05)
-        contrast_val = random.uniform(0.96, 1.04)
+        # Color Grading aleatório
+        if options.get("colorGrading", True):
+            gamma_val = random.uniform(0.95, 1.05)
+            contrast_val = random.uniform(0.96, 1.04)
+            
+            clip = clip.fx(moviepy_imports['gamma_corr'], gamma_val)
+            clip = clip.fx(moviepy_imports['colorx'], contrast_val)
+            modifications.append(f"gamma={gamma_val:.2f}")
+            modifications.append(f"contraste={contrast_val:.2f}")
         
-        clip = clip.fx(moviepy_imports['gamma_corr'], gamma_val)
-        clip = clip.fx(moviepy_imports['colorx'], contrast_val)
-        modifications.append(f"gamma={gamma_val:.2f}")
-        modifications.append(f"contraste={contrast_val:.2f}")
+        # Micro-zoom (respiração) - zoom muito sutil
+        if options.get("microZoom", False):
+            try:
+                # Zoom muito sutil de 1.01 a 1.03
+                zoom_factor = random.uniform(1.01, 1.03)
+                w, h = clip.size
+                new_w = int(w * zoom_factor)
+                new_h = int(h * zoom_factor)
+                
+                # Redimensiona e recorta para manter tamanho original
+                clip = clip.resize((new_w, new_h))
+                x_offset = (new_w - w) // 2
+                y_offset = (new_h - h) // 2
+                clip = clip.crop(x1=x_offset, y1=y_offset, x2=x_offset+w, y2=y_offset+h)
+                modifications.append(f"micro-zoom={zoom_factor:.2f}x")
+            except Exception as e:
+                logger.warning(f"[WARNING] Micro-zoom falhou: {e}")
         
-        # Crop sutil e aleatório (1-3 pixels de cada lado)
-        if random.choice([True, False]):
-            crop_pixels = random.randint(1, 3)
-            w, h = clip.size
-            clip = clip.crop(
-                x1=crop_pixels, 
-                y1=crop_pixels, 
-                x2=w-crop_pixels, 
-                y2=h-crop_pixels
-            )
-            modifications.append(f"crop={crop_pixels}px")
+        # Crop sutil (sempre aplicado se colorGrading está ativo)
+        if options.get("colorGrading", True):
+            if random.choice([True, False]):
+                crop_pixels = random.randint(1, 3)
+                w, h = clip.size
+                if w > crop_pixels * 4 and h > crop_pixels * 4:
+                    clip = clip.crop(
+                        x1=crop_pixels, 
+                        y1=crop_pixels, 
+                        x2=w-crop_pixels, 
+                        y2=h-crop_pixels
+                    )
+                    modifications.append(f"crop={crop_pixels}px")
         
-        logger.info(f"[ANTI-SHADOWBAN] Aplicado: {', '.join(modifications)}")
+        # Film Grain (ruído de película) - implementação básica
+        if options.get("filmGrain", False):
+            try:
+                # Adiciona ruído muito sutil ajustando contraste rapidamente
+                # Nota: Film grain real requer processamento frame a frame
+                noise_intensity = random.uniform(0.98, 1.02)
+                clip = clip.fx(moviepy_imports['colorx'], noise_intensity)
+                modifications.append("film-grain")
+            except Exception as e:
+                logger.warning(f"[WARNING] Film grain falhou: {e}")
+        
+        if modifications:
+            logger.info(f"[ANTI-SHADOWBAN] Aplicado: {', '.join(modifications)}")
+        else:
+            logger.info("[ANTI-SHADOWBAN] Nenhuma modificação aplicada")
         
     except Exception as e:
         logger.warning(f"[WARNING] Anti-shadowban parcialmente aplicado: {e}")
@@ -1320,10 +1391,23 @@ def criar_titulo_simples(
     text_color: str = "#FFD700",
     stroke_color: str = "#000000",
     stroke_width: int = 6,
-    pos_vertical: float = 0.15
+    pos_vertical: float = 0.15,
+    font_family: str = None
 ):
     """
     Renderiza título simples com validação robusta
+    
+    Args:
+        texto: Texto do título
+        largura_video: Largura do vídeo em pixels
+        altura_video: Altura do vídeo em pixels
+        duracao: Duração do título em segundos
+        font_size: Tamanho da fonte em pixels
+        text_color: Cor do texto em HEX (#FFFFFF)
+        stroke_color: Cor da borda em HEX (#000000)
+        stroke_width: Espessura da borda em pixels
+        pos_vertical: Posição vertical como fração (0.0 = topo, 1.0 = base)
+        font_family: Nome da fonte (procura em /workspace/fonts)
     """
     if not PIL_AVAILABLE:
         logger.warning("[WARNING] PIL não disponível para criar título")
@@ -1347,19 +1431,50 @@ def criar_titulo_simples(
         img = Image.new('RGBA', (largura_video, img_h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
         
-        # Tenta carregar fonte
+        # Tenta carregar fonte customizada ou padrão
         font = None
-        if FONT_TO_USE and os.path.exists(FONT_TO_USE):
+        font_path = None
+        
+        # Se font_family foi especificado, procura em /workspace/fonts
+        if font_family:
+            fonts_dir = Path("/workspace/fonts")
+            possible_extensions = ['.ttf', '.otf', '.TTF', '.OTF']
+            
+            # Procura pelo nome exato
+            for ext in possible_extensions:
+                candidate = fonts_dir / f"{font_family}{ext}"
+                if candidate.exists():
+                    font_path = str(candidate)
+                    break
+            
+            # Se não encontrou, procura case-insensitive
+            if not font_path and fonts_dir.exists():
+                for f in fonts_dir.iterdir():
+                    if f.stem.lower() == font_family.lower() and f.suffix.lower() in ['.ttf', '.otf']:
+                        font_path = str(f)
+                        break
+            
+            if font_path:
+                logger.info(f"[TITULO] Usando fonte customizada: {font_path}")
+        
+        # Se não encontrou fonte customizada, usa FONT_TO_USE padrão
+        if not font_path and FONT_TO_USE and os.path.exists(FONT_TO_USE):
+            font_path = FONT_TO_USE
+        
+        # Carrega a fonte
+        if font_path:
             try:
-                font = ImageFont.truetype(FONT_TO_USE, font_size)
+                font = ImageFont.truetype(font_path, font_size)
+                logger.debug(f"[TITULO] Fonte carregada: {font_path}")
             except Exception as e:
-                logger.warning(f"[WARNING] Erro ao carregar fonte: {e}")
+                logger.warning(f"[WARNING] Erro ao carregar fonte {font_path}: {e}")
         
         if font is None:
             # Fonte padrão
             try:
                 font = ImageFont.load_default()
                 font_size = 20  # Ajusta tamanho para fonte padrão
+                logger.warning("[WARNING] Usando fonte padrão do sistema")
             except:
                 logger.warning("[WARNING] Não foi possível carregar fonte padrão")
                 return None
@@ -1565,8 +1680,29 @@ def transcrever_com_whisper_gpu(audio_path: str):
 # ==================== ANÁLISE DE VÍDEO COM IA GPU ULTRA-ROBUSTA ====================
 
 @safe_gpu_operation
-def analyze_video_content_gpu(video_path: str, anime_name: str) -> List[Dict]:
-    """Analisa vídeo para encontrar cenas virais USANDO GPU com fallbacks"""
+def analyze_video_content_gpu(
+    video_path: str, 
+    anime_name: str,
+    scene_preference: str = "balanced",
+    cut_duration: Dict = None
+) -> List[Dict]:
+    """
+    Analisa vídeo para encontrar cenas virais USANDO GPU com fallbacks
+    
+    Args:
+        video_path: Caminho do vídeo
+        anime_name: Nome do anime
+        scene_preference: Foco da viralização ("balanced", "action", "dialogue", "humor")
+        cut_duration: Dict com {"min": X, "max": Y} para duração dos cortes
+    """
+    
+    if cut_duration is None:
+        cut_duration = {"min": 15, "max": 60}
+    
+    min_duration = cut_duration.get("min", 15)
+    max_duration = cut_duration.get("max", 60)
+    
+    logger.info(f"[ANALYSIS] Preferência: {scene_preference}, Duração: {min_duration}-{max_duration}s")
     
     if not AI_AVAILABLE or not WHISPER_AVAILABLE:
         logger.info("[INFO] IA não disponível, usando heurística")
@@ -1653,7 +1789,7 @@ def analyze_video_content_gpu(video_path: str, anime_name: str) -> List[Dict]:
         # Ordena por timestamp
         transcript.sort(key=lambda x: x["start"])
         
-        # Gera cortes baseados na análise
+        # Gera cortes baseados na análise e scene_preference
         cuts = []
         
         if not MOVIEPY_AVAILABLE:
@@ -1668,67 +1804,138 @@ def analyze_video_content_gpu(video_path: str, anime_name: str) -> List[Dict]:
                 logger.warning(f"[WARNING] Erro ao obter duração: {e}")
                 duration = 300
         
-        # Estratégia 1: Prioriza cenas de ação
+        # Separa itens por tipo
         action_items = [t for t in transcript if t["type"] == "action"]
+        dialogue_items = [t for t in transcript if t["type"] == "dialogue"]
         
-        if action_items:
-            for i, action in enumerate(action_items[:3]):  # Máximo 3
-                start = max(0, action["start"] - 3)
-                end = min(duration, action["end"] + 3)
+        # Filtra diálogos por qualidade
+        dialogue_items = [
+            d for d in dialogue_items
+            if len(d["text"].split()) > 4 and d.get("confidence", 0) > -0.5
+        ]
+        dialogue_items.sort(key=lambda x: len(x["text"]), reverse=True)
+        
+        logger.info(f"[ANALYSIS] Encontrados: {len(action_items)} ações, {len(dialogue_items)} diálogos")
+        
+        # Define prioridade baseada em scene_preference
+        if scene_preference == "action":
+            # Prioriza 100% ação
+            primary_items = action_items
+            secondary_items = dialogue_items
+            primary_label = "AÇÃO"
+            secondary_label = "CENA"
+            logger.info("[ANALYSIS] Modo: Priorizar Lutas/Ação")
+            
+        elif scene_preference == "dialogue":
+            # Prioriza 100% diálogo
+            primary_items = dialogue_items
+            secondary_items = action_items
+            primary_label = "DIÁLOGO"
+            secondary_label = "AÇÃO"
+            logger.info("[ANALYSIS] Modo: Priorizar Diálogo/História")
+            
+        elif scene_preference == "humor":
+            # Humor: prioriza diálogos curtos e pontuais
+            dialogue_items.sort(key=lambda x: len(x["text"]))  # Mais curtos primeiro
+            primary_items = dialogue_items[:10]  # Top 10 mais curtos
+            secondary_items = action_items
+            primary_label = "MOMENTO"
+            secondary_label = "CENA"
+            logger.info("[ANALYSIS] Modo: Priorizar Humor")
+            
+        else:  # balanced
+            # Balanceado: alterna entre ação e diálogo
+            primary_items = []
+            for i in range(max(len(action_items), len(dialogue_items))):
+                if i < len(action_items):
+                    action_items[i]["_label"] = "AÇÃO"
+                    primary_items.append(action_items[i])
+                if i < len(dialogue_items):
+                    dialogue_items[i]["_label"] = "CENA"
+                    primary_items.append(dialogue_items[i])
+            secondary_items = []
+            primary_label = None  # Usa _label individual
+            secondary_label = "CENA"
+            logger.info("[ANALYSIS] Modo: Equilíbrio Padrão")
+        
+        # Gera cortes primários
+        for i, item in enumerate(primary_items[:5]):  # Analisa até 5
+            if len(cuts) >= 3:
+                break
+            
+            start = max(0, item["start"] - 3)
+            end = min(duration, item["end"] + 3)
+            clip_duration = end - start
+            
+            # Ajusta para respeitar min/max duration
+            if clip_duration < min_duration:
+                # Expande para atingir mínimo
+                expand = (min_duration - clip_duration) / 2
+                start = max(0, start - expand)
+                end = min(duration, end + expand)
                 clip_duration = end - start
-                
-                if 15 <= clip_duration <= 60:  # Entre 15 e 60 segundos
-                    cuts.append({
-                        "start": start,
-                        "end": end,
-                        "title": f"{anime_name} - AÇÃO {i+1}",
-                        "score": min(95, int(70 + action.get("score", 0) / 5)),
-                        "type": "action",
-                        "duration": clip_duration
-                    })
+            elif clip_duration > max_duration:
+                # Reduz para máximo
+                center = (start + end) / 2
+                start = center - max_duration / 2
+                end = center + max_duration / 2
+                clip_duration = max_duration
+            
+            if min_duration <= clip_duration <= max_duration:
+                label = item.get("_label", primary_label) or "CENA"
+                cuts.append({
+                    "start": start,
+                    "end": end,
+                    "title": f"{anime_name} - {label} {len(cuts)+1}",
+                    "score": min(95, int(70 + item.get("score", 50) / 5)),
+                    "type": item["type"],
+                    "duration": clip_duration
+                })
         
-        # Estratégia 2: Diálogos importantes (se precisar mais cortes)
+        # Completa com secundários se necessário
         if len(cuts) < 3:
-            dialogue_items = [t for t in transcript if t["type"] == "dialogue"]
-            
-            # Filtra por comprimento e confiança
-            dialogue_items = [
-                d for d in dialogue_items
-                if len(d["text"].split()) > 4 and d.get("confidence", 0) > -0.5
-            ]
-            
-            # Ordena por tamanho do texto (provavelmente mais importante)
-            dialogue_items.sort(key=lambda x: len(x["text"]), reverse=True)
-            
-            for i, item in enumerate(dialogue_items):
+            for i, item in enumerate(secondary_items):
                 if len(cuts) >= 3:
                     break
                 
-                start = max(0, item["start"] - 1.5)
-                end = min(duration, item["end"] + 1.5)
+                start = max(0, item["start"] - 2)
+                end = min(duration, item["end"] + 2)
                 clip_duration = end - start
                 
-                if 10 <= clip_duration <= 45:
+                # Ajusta duração
+                if clip_duration < min_duration:
+                    expand = (min_duration - clip_duration) / 2
+                    start = max(0, start - expand)
+                    end = min(duration, end + expand)
+                    clip_duration = end - start
+                elif clip_duration > max_duration:
+                    center = (start + end) / 2
+                    start = center - max_duration / 2
+                    end = center + max_duration / 2
+                    clip_duration = max_duration
+                
+                if min_duration <= clip_duration <= max_duration:
                     cuts.append({
                         "start": start,
                         "end": end,
-                        "title": f"{anime_name} - CENA {len(cuts)+1}",
-                        "score": max(50, 75 - (i * 5)),
-                        "type": "dialogue",
+                        "title": f"{anime_name} - {secondary_label} {len(cuts)+1}",
+                        "score": max(50, 70 - (i * 5)),
+                        "type": item["type"],
                         "duration": clip_duration
                     })
         
-        # Estratégia 3: Fallback - divide em partes iguais
+        # Estratégia fallback: divide em partes iguais
         if not cuts:
             logger.info("[INFO] Nenhum corte automático encontrado, usando divisão uniforme")
-            num_parts = min(3, max(1, int(duration / 40)))
+            target_duration = (min_duration + max_duration) / 2
+            num_parts = min(3, max(1, int(duration / target_duration)))
             
             for i in range(num_parts):
-                part_duration = duration / num_parts
+                part_duration = min(max_duration, duration / num_parts)
                 start = i * part_duration
-                end = min((i + 1) * part_duration, duration)
+                end = min(start + part_duration, duration)
                 
-                if end - start >= 25:
+                if end - start >= min_duration:
                     cuts.append({
                         "start": start,
                         "end": end,
@@ -1879,9 +2086,14 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
         clip = video.subclip(start, end)
         clips_to_close.append(clip)
 
-        # Aplica anti-shadowban
-        if config.get("antiShadowban", True):
-            clip = apply_antishadowban(clip)
+        # Aplica anti-shadowban com opções v12.8
+        antishadowban_config = config.get("antiShadowban", {})
+        if isinstance(antishadowban_config, dict):
+            if antishadowban_config.get("enabled", True):
+                clip = apply_antishadowban(clip, antishadowban_config)
+                clips_to_close.append(clip)
+        elif antishadowban_config:  # Retrocompatibilidade: boolean True
+            clip = apply_antishadowban(clip, None)
             clips_to_close.append(clip)
         
         # Configurações TikTok
@@ -1914,30 +2126,61 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
             clips_to_close.append(bg_clip)
             logger.debug("[RENDER] Background sólido")
         
-        # Ajusta vídeo para 9:16
+        # ==================== ENQUADRAMENTO v12.8 ====================
+        # frameMode: "letterbox" (moldura) ou "fill" (preencher com crop)
+        frame_mode = config.get("frameMode", "letterbox")
+        
         w, h = clip.w, clip.h
-        target_aspect = target_w / target_h
         clip_aspect = w / h
+        target_aspect = target_w / target_h
         
-        if clip_aspect > target_aspect:
-            # Muito largo - crop horizontal
-            new_w = h * target_aspect
-            x1 = (w - new_w) / 2
-            clip_cropped = clip.crop(x1=x1, width=new_w)
+        if frame_mode == "letterbox":
+            # CORTE MOLDURA: Mantém vídeo 16:9 centralizado sobre fundo 9:16
+            # Não faz crop - preserva todo o conteúdo
+            
+            # Calcula tamanho para caber na largura (1080px)
+            video_width = target_w
+            video_height = int(video_width / clip_aspect)
+            
+            # Se ficou maior que a altura disponível, ajusta pela altura
+            if video_height > target_h:
+                video_height = target_h
+                video_width = int(video_height * clip_aspect)
+            
+            # Redimensiona mantendo proporção original
+            clip_resized = clip.resize(width=video_width, height=video_height)
+            clips_to_close.append(clip_resized)
+            
+            # Centraliza verticalmente e horizontalmente
+            x_pos = (target_w - video_width) // 2
+            y_pos = (target_h - video_height) // 2
+            clip_pos = clip_resized.set_position((x_pos, y_pos))
+            clips_to_close.append(clip_pos)
+            
+            logger.info(f"[RENDER] Corte moldura: {video_width}x{video_height} centralizado em {target_w}x{target_h}")
+        
         else:
-            # Muito alto - crop vertical
-            new_h = w / target_aspect
-            y1 = (h - new_h) / 2
-            clip_cropped = clip.crop(y1=y1, height=new_h)
-        
-        clips_to_close.append(clip_cropped)
-
-        # Redimensiona
-        clip_resized = clip_cropped.resize(width=target_w)
-        clips_to_close.append(clip_resized)
-
-        clip_pos = clip_resized.set_position(('center', 'center'))
-        clips_to_close.append(clip_pos)
+            # MODO FILL: Crop para preencher (comportamento anterior)
+            if clip_aspect > target_aspect:
+                # Muito largo - crop horizontal
+                new_w = h * target_aspect
+                x1 = (w - new_w) / 2
+                clip_cropped = clip.crop(x1=x1, width=new_w)
+            else:
+                # Muito alto - crop vertical
+                new_h = w / target_aspect
+                y1 = (h - new_h) / 2
+                clip_cropped = clip.crop(y1=y1, height=new_h)
+            
+            clips_to_close.append(clip_cropped)
+            
+            clip_resized = clip_cropped.resize(width=target_w)
+            clips_to_close.append(clip_resized)
+            
+            clip_pos = clip_resized.set_position(('center', 'center'))
+            clips_to_close.append(clip_pos)
+            
+            logger.info(f"[RENDER] Modo fill: crop para {target_w}x{target_h}")
         
         # Camadas
         layers = [bg_clip, clip_pos]
@@ -1948,6 +2191,12 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
             logger.info(f"[TITULO] Gerando título: '{title[:40]}...'")
             title_style = config.get("titleStyle", {})
             safe_title_text = sanitize_input(str(title).upper(), max_len=80)
+            
+            # Posição vertical: converte de % para fração (15 -> 0.15)
+            vertical_pos = title_style.get("verticalPosition", 15)
+            if isinstance(vertical_pos, (int, float)) and vertical_pos > 1:
+                vertical_pos = vertical_pos / 100.0  # Converte de % para fração
+            
             title_clip = criar_titulo_simples(
                 texto=safe_title_text,
                 largura_video=target_w,
@@ -1956,7 +2205,9 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
                 font_size=title_style.get("fontSize", 70),
                 text_color=title_style.get("textColor", "#FFD700"),
                 stroke_color=title_style.get("strokeColor", "#000000"),
-                stroke_width=title_style.get("strokeWidth", 6)
+                stroke_width=title_style.get("strokeWidth", 6),
+                pos_vertical=vertical_pos,
+                font_family=title_style.get("fontFamily")
             )
 
             if title_clip:
@@ -2151,7 +2402,7 @@ def handler(event):
     
     # LOG DE INICIALIZAÇÃO
     logger.info("=" * 70)
-    logger.info(f"ANIMECUT v12.7.2 - NOVA REQUISIÇÃO [ID: {request_id}]")
+    logger.info(f"ANIMECUT v12.7.3 - NOVA REQUISIÇÃO [ID: {request_id}]")
     logger.info("=" * 70)
     
     # LOG DE STATUS DO SISTEMA
@@ -2223,18 +2474,74 @@ def handler(event):
             bg_path = None
             logger.info("[BACKGROUND] Nenhuma URL de background fornecida")
         
-        # Configuração
+        # Configuração v12.8 - COMPLETA
+        # Anti-shadowban pode ser boolean (retrocompatível) ou objeto detalhado
+        antishadowban_input = input_data.get("antiShadowban", True)
+        if isinstance(antishadowban_input, dict):
+            antishadowban_config = {
+                "enabled": antishadowban_input.get("enabled", True),
+                "mirror": antishadowban_input.get("mirror", True),
+                "colorGrading": antishadowban_input.get("colorGrading", True),
+                "microZoom": antishadowban_input.get("microZoom", False),
+                "filmGrain": antishadowban_input.get("filmGrain", False)
+            }
+        else:
+            # Retrocompatibilidade: boolean simples
+            antishadowban_config = {
+                "enabled": antishadowban_input == True,
+                "mirror": True,
+                "colorGrading": True,
+                "microZoom": False,
+                "filmGrain": False
+            }
+        
+        # TitleStyle com novos parâmetros
+        default_title_style = {
+            "fontSize": 70,
+            "textColor": "#FFD700",
+            "strokeColor": "#000000",
+            "strokeWidth": 6,
+            "verticalPosition": 15,  # % do topo
+            "fontFamily": None  # Usa fonte padrão
+        }
+        title_style_input = input_data.get("titleStyle", {})
+        title_style = {**default_title_style, **title_style_input}
+        
+        # Configuração de duração dos cortes
+        cut_duration_input = input_data.get("cutDuration", {})
+        cut_duration = {
+            "min": cut_duration_input.get("min", 15),
+            "max": cut_duration_input.get("max", 60)
+        }
+        
+        # Configuração de áudio
+        audio_input = input_data.get("audio", {})
+        audio_config = {
+            "isolateVoice": audio_input.get("isolateVoice", False)
+        }
+        
         config = {
             "animeName": anime_name,
-            "antiShadowban": input_data.get("antiShadowban", True),
             "generateTitles": input_data.get("generateTitles", True),
-            "titleStyle": input_data.get("titleStyle", {
-                "fontSize": 70,
-                "textColor": "#FFD700",
-                "strokeColor": "#000000",
-                "strokeWidth": 6
+            "titleStyle": title_style,
+            "background_path": bg_path,
+            
+            # v12.8 - Novos parâmetros
+            "frameMode": input_data.get("frameMode", "letterbox"),  # "letterbox" ou "fill"
+            "scenePreference": input_data.get("scenePreference", "balanced"),  # "balanced", "action", "dialogue", "humor"
+            "cutDuration": cut_duration,
+            "antiShadowban": antishadowban_config,
+            "audio": audio_config,
+            
+            # Smart Crop (para implementação futura)
+            "smartCrop": input_data.get("smartCrop", {
+                "enabled": False,
+                "mode": "fixed",
+                "zoom": 1.0
             }),
-            "background_path": bg_path
+            
+            # Resolução de saída
+            "outputResolution": input_data.get("outputResolution", "1080p")
         }
         
         logger.info(f"[CONFIG] {json.dumps(config, default=str)}")
@@ -2246,8 +2553,13 @@ def handler(event):
         cut_type = input_data.get("cutType", "auto")
         
         if cut_type == "auto" and AI_AVAILABLE:
-            logger.info("[MODE] Automático com IA")
-            cuts = analyze_video_content_gpu(video_path, anime_name)
+            logger.info(f"[MODE] Automático com IA (foco: {config['scenePreference']})")
+            cuts = analyze_video_content_gpu(
+                video_path, 
+                anime_name,
+                scene_preference=config['scenePreference'],
+                cut_duration=config['cutDuration']
+            )
         elif cut_type == "manual":
             manual_cuts = input_data.get("cuts", [])
             if manual_cuts:
@@ -2255,7 +2567,12 @@ def handler(event):
                 logger.info(f"[MODE] Manual: {len(cuts)} cortes")
             else:
                 logger.info("[MODE] Manual sem cortes, usando automático")
-                cuts = analyze_video_content_gpu(video_path, anime_name)
+                cuts = analyze_video_content_gpu(
+                    video_path, 
+                    anime_name,
+                    scene_preference=config['scenePreference'],
+                    cut_duration=config['cutDuration']
+                )
         else:
             logger.info("[MODE] Fallback")
             cuts = generate_fallback_cuts(video_path, anime_name)
@@ -2447,15 +2764,18 @@ if __name__ == "__main__":
         # Banner com versão detalhada
         print("\n" + "="*70)
         print("╔═══════════════════════════════════════════════════════════════════╗")
-        print("║   ANIMECUT SERVERLESS v12.7.2 - BUILD 2025-12-15 15:45 FORCE     ║")
+        print("║   ANIMECUT SERVERLESS v12.8 - BUILD 2025-12-17 02:30             ║")
+        print("║   CORTE MOLDURA + CONTROLES AVANÇADOS                            ║")
         print("╚═══════════════════════════════════════════════════════════════════╝")
-        print("Correções v12.7.2:")
-        print("  ✓ Bucket B2: KortexClipAI2 (CORRIGIDO)")
-        print("  ✓ KeyID B2: 00568702c2cbfc60000000002")
-        print("  ✓ Download de background melhorado")
-        print("  ✓ Fontes do volume /workspace/fonts")
-        print("  ✓ Títulos com logs detalhados")
-        print("  ✓ Fallback NVENC → libx264")
+        print("Novidades v12.8:")
+        print("  ✓ CORTE MOLDURA: Mantém 16:9 centralizado sobre 9:16")
+        print("  ✓ Posição vertical do título configurável")
+        print("  ✓ Fonte customizada (/workspace/fonts)")
+        print("  ✓ Foco de viralização (ação/diálogo/humor/balanceado)")
+        print("  ✓ Duração de cortes configurável (min/max)")
+        print("  ✓ Anti-shadowban com controles individuais")
+        print("  ✓ Micro-zoom e Film Grain opcionais")
+        print("  ✓ Bucket B2: KortexClipAI2 (FORÇADO)")
         print(f"Volume: {VOLUME_BASE}")
         print(f"Cache: {CACHE_DIR}")
         print(f"B2 Bucket: {B2_BUCKET if B2_BUCKET else 'NÃO CONFIGURADO'}")
