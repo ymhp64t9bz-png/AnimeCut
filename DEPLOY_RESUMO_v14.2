@@ -1,0 +1,96 @@
+# 🚀 ANIMECUT v14.2 - RESUMO DE DEPLOY E DOCUMENTAÇÃO
+
+## 📦 ARQUIVOS PARA DEPLOY NO SISTEMA (RunPod)
+
+### 1. handler.py
+- **Destino**: Repositório Git do sistema AnimeCut
+- **Ação**: Substituir o arquivo existente
+- **Commit**: `git add handler.py && git commit -m "v14.2 - Títulos sem reticências + Fonte grande"`
+
+### 2. Dockerfile  
+- **Destino**: Repositório Git do sistema AnimeCut
+- **Ação**: Substituir o arquivo existente
+- **Commit**: `git add Dockerfile && git commit -m "v14.2 - CACHEBUST atualizado"`
+
+### 3. Deploy
+```bash
+git push origin main
+# O RunPod vai detectar e fazer rebuild automático
+```
+
+---
+
+## 📄 ARQUIVOS PARA ENVIAR AO AGENT 3 (Webapp)
+
+### 1. SOLICITAR_AGENT3_DIAGNOSTICO.md
+- **Enviar imediatamente** para o Agent 3
+- Contém código de DEBUG para identificar o problema do background
+- Pede informações específicas sobre como o webapp envia os parâmetros
+
+---
+
+## ✅ CORREÇÕES APLICADAS NA v14.2
+
+| Problema | Status | Solução |
+|----------|--------|---------|
+| Títulos com reticências (...) | ✅ CORRIGIDO | Sempre termina com `!` |
+| Tamanho da fonte ignorado | ✅ CORRIGIDO | Agora aplica o tamanho correto |
+| Logs de diagnóstico | ✅ ADICIONADO | Mostra todos os parâmetros recebidos |
+| Limite de 3 cortes | ✅ CORRIGIDO (v14.0) | Sem limite |
+| Cortes duplicados | ✅ CORRIGIDO (v14.0) | Verificação de sobreposição |
+
+---
+
+## ⚠️ PROBLEMA PENDENTE: BACKGROUND
+
+O background NÃO está sendo aplicado. Possíveis causas:
+
+1. **Webapp não está enviando** `background_url`
+2. **Nome do campo diferente** (ex: `backgroundUrl` ao invés de `background_url`)
+3. **URL inválida ou inacessível**
+
+**Ação necessária**: Enviar `SOLICITAR_AGENT3_DIAGNOSTICO.md` para o Agent 3 descobrir o que está acontecendo.
+
+---
+
+## 🔍 COMO VERIFICAR SE AS CORREÇÕES FUNCIONARAM
+
+Após deploy, o log do RunPod deve mostrar:
+
+```
+╔═══════════════════════════════════════════════════════════════════╗
+║   ANIMECUT SERVERLESS v14.2 - BUILD 2025-12-17 08:00             ║
+║   TÍTULOS SEM RETICÊNCIAS + FONTE GRANDE + BG DIAGNÓSTICO        ║
+╚═══════════════════════════════════════════════════════════════════╝
+
+[TITULO v14.2] CRIANDO TÍTULO
+  Texto: 'EU VOU TE PROTEGER'
+  font_size RECEBIDO: 120 (tipo: int)
+  text_color: #FFFFFF
+  ...
+[TITULO] ✓ Criado com sucesso: 'EU VOU TE PROTEGER!' (1 linhas, tamanho=120)
+```
+
+---
+
+## 📊 COMPARAÇÃO: ANTES vs DEPOIS
+
+### Títulos
+| Antes (v14.1) | Depois (v14.2) |
+|---------------|----------------|
+| `"POR QUE VOCÊ TEM..."` | `"POR QUE VOCÊ TEM!"` |
+| `"EU VOU TE PROTEGER..."` | `"EU VOU TE PROTEGER!"` |
+
+### Tamanho da Fonte
+| Antes | Depois |
+|-------|--------|
+| Sempre pequeno (~20px) | Aplica o tamanho escolhido (ex: 120px) |
+
+---
+
+## 📋 PRÓXIMOS PASSOS
+
+1. **DEPLOY**: Atualizar `handler.py` e `Dockerfile` no repositório
+2. **DIAGNÓSTICO**: Enviar `SOLICITAR_AGENT3_DIAGNOSTICO.md` para Agent 3
+3. **AGUARDAR**: Resposta do Agent 3 sobre o background
+4. **CORRIGIR**: Após diagnóstico, corrigir o problema do background
