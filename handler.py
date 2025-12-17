@@ -3,7 +3,7 @@
 """
 AnimeCut Serverless v12.7.3 FORCE B2 BUCKET
 BUILD: 2025-12-16 14:00 - IGNORA ENV ANTIGA
-Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1
+Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1 
 CORREÇÕES: Força KortexClipAI2 mesmo com variável ambiente errada
 """
 
