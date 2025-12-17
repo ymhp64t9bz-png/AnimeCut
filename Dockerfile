@@ -6,7 +6,7 @@ FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 # IMPORTANTE: Mude este valor para forçar rebuild completo no RunPod
 ARG CACHEBUST=20251217_0700_V14_1_TRANSCRIPTION_TITLES
 RUN echo "Build timestamp: ${CACHEBUST}" > /BUILD_INFO && \
-    echo "V14.1 - TÍTULOS TRANSCRIÇÃO + SEM LIMITE + PARÂMETROS" >> /BUILD_INFO
+    echo "V14.1 - TÍTULOS TRANSCRIÇÃO + SEM LIMITE + PARÂMETROS" >> /BUILD_INFO 
 
 WORKDIR /app
 
