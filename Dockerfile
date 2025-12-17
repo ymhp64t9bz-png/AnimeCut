@@ -1,18 +1,18 @@
-# ✂️ AnimeCut Serverless V14.1 - TÍTULOS TRANSCRIÇÃO + SEM LIMITE
-# NOVIDADES: Títulos do diálogo real, sem limite de cortes, parâmetros completos
+# ✂️ AnimeCut Serverless V14.2 - TÍTULOS SEM RETICÊNCIAS + FONTE GRANDE
+# NOVIDADES: Títulos sem reticências, tamanho de fonte aplicado, diagnóstico
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 # ==================== CACHE BUSTER ====================
 # IMPORTANTE: Mude este valor para forçar rebuild completo no RunPod
-ARG CACHEBUST=20251217_0700_V14_1_TRANSCRIPTION_TITLES
+ARG CACHEBUST=20251217_0800_V14_2_NO_ELLIPSIS
 RUN echo "Build timestamp: ${CACHEBUST}" > /BUILD_INFO && \
-    echo "V14.1 - TÍTULOS TRANSCRIÇÃO + SEM LIMITE + PARÂMETROS" >> /BUILD_INFO 
+    echo "V14.2 - TÍTULOS SEM RETICÊNCIAS + FONTE GRANDE" >> /BUILD_INFO
 
 WORKDIR /app
 
 # Variáveis de Ambiente
-ENV BUILD_VERSION="14.1"
-ENV BUILD_DATE="2025-12-17T07:00:00Z"
+ENV BUILD_VERSION="14.2"
+ENV BUILD_DATE="2025-12-17T08:00:00Z"
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
@@ -120,16 +120,16 @@ RUN python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 
 # ==================== 14. HANDLER - SEMPRE ATUALIZADO ====================
 # Este ARG invalida o cache para SEMPRE copiar o handler mais recente
-ARG HANDLER_VERSION=14.1_20251217_0700_TRANSCRIPTION_TITLES
+ARG HANDLER_VERSION=14.2_20251217_0800_NO_ELLIPSIS
 RUN echo "Handler version: ${HANDLER_VERSION}"
 
 # Copia handler (NUNCA usa cache devido ao ARG acima)
 COPY handler.py .
 
 # Mostra versão no build log
-RUN echo "=== BUILD COMPLETO v14.1 ===" && \
+RUN echo "=== BUILD COMPLETO v14.2 ===" && \
     echo "Handler: ${HANDLER_VERSION}" && \
-    echo "Novidades: Títulos da Transcrição, Sem Limite, Parâmetros Completos" && \
+    echo "Novidades: Títulos sem reticências, Fonte grande, Diagnóstico" && \
     head -10 handler.py
 
 # Health check
