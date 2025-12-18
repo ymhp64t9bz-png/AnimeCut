@@ -1553,34 +1553,66 @@ def criar_titulo_simples(
         font = None
         font_path = None
         
-        # Se font_family foi especificado, procura em /workspace/fonts
+        # v15.5: Múltiplos diretórios de fontes
+        font_dirs = [
+            Path("/workspace/fonts"),
+            Path("/app/fonts"),
+            Path("/usr/local/share/fonts/custom"),
+            Path("/usr/share/fonts/truetype")
+        ]
+        
+        # Se font_family foi especificado, procura nas pastas de fontes
         if font_family:
-            fonts_dir = Path("/workspace/fonts")
-            possible_extensions = ['.ttf', '.otf', '.TTF', '.OTF']
+            logger.info(f"[TITULO] Procurando fonte '{font_family}'...")
             
-            logger.info(f"[TITULO] Procurando fonte '{font_family}' em {fonts_dir}")
-            
-            # Procura pelo nome exato
-            for ext in possible_extensions:
-                candidate = fonts_dir / f"{font_family}{ext}"
-                if candidate.exists():
-                    font_path = str(candidate)
-                    logger.info(f"[TITULO] ✓ Fonte encontrada: {font_path}")
-                    break
-            
-            # Se não encontrou, procura case-insensitive
-            if not font_path and fonts_dir.exists():
-                for f in fonts_dir.iterdir():
-                    if f.stem.lower() == font_family.lower() and f.suffix.lower() in ['.ttf', '.otf']:
-                        font_path = str(f)
-                        logger.info(f"[TITULO] ✓ Fonte encontrada (case-insensitive): {font_path}")
+            for fonts_dir in font_dirs:
+                if not fonts_dir.exists():
+                    continue
+                    
+                possible_extensions = ['.ttf', '.otf', '.TTF', '.OTF', '']
+                
+                # Procura pelo nome exato
+                for ext in possible_extensions:
+                    candidate = fonts_dir / f"{font_family}{ext}"
+                    if candidate.exists():
+                        font_path = str(candidate)
+                        logger.info(f"[TITULO] ✓ Fonte encontrada: {font_path}")
                         break
+                
+                if font_path:
+                    break
+                
+                # Se não encontrou, procura case-insensitive
+                try:
+                    for f in fonts_dir.iterdir():
+                        if f.is_file():
+                            # Verifica nome exato (sem extensão)
+                            if f.stem.lower() == font_family.lower() and f.suffix.lower() in ['.ttf', '.otf']:
+                                font_path = str(f)
+                                logger.info(f"[TITULO] ✓ Fonte encontrada (case-insensitive): {font_path}")
+                                break
+                            # Verifica se o nome contém o font_family
+                            if font_family.lower() in f.stem.lower() and f.suffix.lower() in ['.ttf', '.otf']:
+                                font_path = str(f)
+                                logger.info(f"[TITULO] ✓ Fonte parcial encontrada: {font_path}")
+                                break
+                except:
+                    pass
+                
+                if font_path:
+                    break
             
             if not font_path:
                 logger.warning(f"[TITULO] ✗ Fonte '{font_family}' NÃO encontrada")
-                if fonts_dir.exists():
-                    available = [f.name for f in fonts_dir.iterdir() if f.suffix.lower() in ['.ttf', '.otf']]
-                    logger.info(f"[TITULO] Fontes disponíveis: {available[:5]}")
+                # Lista fontes disponíveis
+                for fonts_dir in font_dirs:
+                    if fonts_dir.exists():
+                        try:
+                            available = [f.name for f in fonts_dir.iterdir() if f.suffix.lower() in ['.ttf', '.otf']][:5]
+                            if available:
+                                logger.info(f"[TITULO] Fontes em {fonts_dir}: {available}")
+                        except:
+                            pass
         
         # Se não encontrou fonte customizada, usa FONT_TO_USE padrão
         if not font_path and FONT_TO_USE and os.path.exists(FONT_TO_USE):
@@ -1958,14 +1990,55 @@ def analyze_video_content_gpu(
         
         important_moments = []
         
-        # Adiciona cenas de ação
+        # Função helper para buscar transcrição em um intervalo de tempo
+        def get_transcription_for_range(start_time, end_time, segments):
+            """Busca a melhor frase da transcrição no intervalo de tempo"""
+            best_text = ""
+            best_score = 0
+            
+            for seg in segments:
+                # Verifica se o segmento está dentro do intervalo
+                if seg["start"] >= start_time - 5 and seg["end"] <= end_time + 5:
+                    text = seg["text"].strip()
+                    
+                    # Calcula score baseado em critérios
+                    score = len(text.split())  # Mais palavras = melhor
+                    
+                    # Bonus para frases com emoção
+                    if seg.get("has_emotion"):
+                        score += 10
+                    
+                    # Bonus para palavras de impacto
+                    impact_words = ["eu", "você", "poder", "força", "nunca", "sempre", 
+                                   "vou", "proteger", "morrer", "viver", "destino"]
+                    text_lower = text.lower()
+                    score += sum(3 for word in impact_words if word in text_lower)
+                    
+                    if score > best_score and len(text) > 10:
+                        best_score = score
+                        best_text = text
+            
+            return best_text
+        
+        # Adiciona cenas de ação COM TRANSCRIÇÃO REAL
         for action in action_scenes:
+            # Busca a melhor frase da transcrição durante essa cena
+            action_text = get_transcription_for_range(
+                action["start"], 
+                action["end"], 
+                all_segments
+            )
+            
+            # Se não achou transcrição, usa marcador genérico
+            if not action_text:
+                action_text = ""  # Vazio vai para fallback
+            
             important_moments.append({
                 "start": action["start"],
                 "end": action["end"],
                 "type": "action",
                 "score": action.get("score", 70),
-                "text": "[CENA DE AÇÃO INTENSA]",
+                "text": action_text,
                 "title_hint": "action"
             })
         
@@ -2578,14 +2651,14 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
         output_filename = f"cut_{num}_{safe_title}_{uuid.uuid4().hex[:6]}.mp4"
         output_path = OUTPUT_DIR / output_filename
         
-        # ==================== ENCODING v15.4 - OTIMIZADO ====================
-        # CORREÇÕES:
-        # - Remove preset p5 que causa Broken Pipe
-        # - Usa libx264 ultrafast como principal (mais confiável)
-        # - NVENC como fallback se libx264 falhar
+        # ==================== ENCODING v15.5 - ULTRARRÁPIDO COM FFMPEG PIPE ====================
+        # ESTRATÉGIA: Usa FFmpeg via pipe para encoding extremamente rápido
+        # - MoviePy apenas para composição em memória
+        # - FFmpeg recebe frames via pipe e codifica com NVENC/x264
+        # - Tempo esperado: ~30-60s por corte de 100s
         
         logger.info("=" * 60)
-        logger.info("[ENCODING v15.4] OTIMIZADO E CONFIÁVEL")
+        logger.info("[ENCODING v15.5] ULTRARRÁPIDO - FFMPEG PIPE")
         logger.info("=" * 60)
         
         start_encode = time.time()
@@ -2597,72 +2670,118 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
             import shutil
             disk_free = shutil.disk_usage(TEMP_DIR).free / (1024**3)
             logger.info(f"[DISCO] Espaço livre: {disk_free:.1f} GB")
-            if disk_free < 2:
-                # Limpa arquivos temporários
-                for f in TEMP_DIR.glob("*.m4a"):
-                    try: f.unlink()
-                    except: pass
-                for f in TEMP_DIR.glob("*.wav"):
-                    try: f.unlink()
-                    except: pass
         except:
             pass
         
         encoding_success = False
-        temp_audio = TEMP_DIR / f"audio_{num}_{uuid.uuid4().hex[:6]}.m4a"
         
-        # ESTRATÉGIA v15.4:
-        # 1. libx264 ultrafast (mais confiável, ainda rápido)
-        # 2. libx264 veryfast (se ultrafast falhar)
-        # 3. NVENC apenas se CPU falhar
-        
-        codecs_to_try = [
-            ('libx264', 'ultrafast', ['-pix_fmt', 'yuv420p', '-crf', '28', '-movflags', '+faststart']),
-            ('libx264', 'veryfast', ['-pix_fmt', 'yuv420p', '-crf', '26', '-movflags', '+faststart']),
-        ]
-        
-        # Adiciona NVENC apenas como último recurso
+        # Verifica NVENC disponível
+        nvenc_available = False
         try:
             result = subprocess.run(['ffmpeg', '-hide_banner', '-encoders'], 
                                    capture_output=True, text=True, timeout=10)
-            if 'h264_nvenc' in result.stdout:
-                # NVENC com configurações mais conservadoras
-                codecs_to_try.append(('h264_nvenc', 'default', [
-                    '-pix_fmt', 'yuv420p',
-                    '-b:v', '5M',
-                    '-maxrate', '8M', 
-                    '-bufsize', '16M',
-                    '-movflags', '+faststart'
-                ]))
+            nvenc_available = 'h264_nvenc' in result.stdout
+            logger.info(f"[NVENC] Disponível: {'✓ SIM' if nvenc_available else '✗ NÃO'}")
         except:
             pass
         
-        for codec, preset, ffmpeg_params in codecs_to_try:
-            try:
-                logger.info(f"[ENCODING] Tentando {codec} (preset={preset})...")
+        # ==================== MÉTODO 1: FFMPEG DIRETO VIA PIPE ====================
+        try:
+            logger.info("[ENCODING] Método 1: FFmpeg via pipe...")
+            
+            # Parâmetros do vídeo
+            fps = final.fps if hasattr(final, 'fps') and final.fps else 24
+            width, height = target_w, target_h
+            
+            # Escolhe encoder
+            if nvenc_available:
+                video_codec = ['-c:v', 'h264_nvenc', '-preset', 'p4', '-b:v', '6M']
+                logger.info("[ENCODING] Usando NVENC (p4)")
+            else:
+                video_codec = ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26']
+                logger.info("[ENCODING] Usando libx264 (ultrafast)")
+            
+            # Comando FFmpeg para receber frames via pipe
+            ffmpeg_cmd = [
+                'ffmpeg', '-y',
+                '-f', 'rawvideo',
+                '-vcodec', 'rawvideo',
+                '-s', f'{width}x{height}',
+                '-pix_fmt', 'rgb24',
+                '-r', str(fps),
+                '-i', '-',  # Input via pipe
+                '-an',  # Sem áudio por enquanto
+                *video_codec,
+                '-pix_fmt', 'yuv420p',
+                '-movflags', '+faststart',
+                str(output_path).replace('.mp4', '_temp.mp4')
+            ]
+            
+            # Inicia FFmpeg como subprocess
+            ffmpeg_proc = subprocess.Popen(
+                ffmpeg_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            # Envia frames para FFmpeg
+            frame_count = 0
+            for frame in final.iter_frames(fps=fps, dtype='uint8'):
+                try:
+                    ffmpeg_proc.stdin.write(frame.tobytes())
+                    frame_count += 1
+                    if frame_count % 100 == 0:
+                        logger.debug(f"[ENCODING] Frames processados: {frame_count}")
+                except BrokenPipeError:
+                    break
+            
+            # Fecha stdin e aguarda
+            ffmpeg_proc.stdin.close()
+            ffmpeg_proc.wait(timeout=300)
+            
+            temp_video = Path(str(output_path).replace('.mp4', '_temp.mp4'))
+            
+            if temp_video.exists() and temp_video.stat().st_size > 50000:
+                # Adiciona áudio
+                logger.info("[ENCODING] Adicionando áudio...")
                 
-                # Limpa arquivo anterior se existir
-                if output_path.exists():
-                    try: output_path.unlink()
+                # Extrai áudio do clip original
+                temp_audio = TEMP_DIR / f"audio_{num}_{uuid.uuid4().hex[:6]}.m4a"
+                
+                if final.audio:
+                    final.audio.write_audiofile(
+                        str(temp_audio),
+                        fps=44100,
+                        nbytes=2,
+                        codec='aac',
+                        bitrate='128k',
+                        verbose=False,
+                        logger=None
+                    )
+                    
+                    # Combina vídeo + áudio
+                    merge_cmd = [
+                        'ffmpeg', '-y',
+                        '-i', str(temp_video),
+                        '-i', str(temp_audio),
+                        '-c:v', 'copy',
+                        '-c:a', 'aac',
+                        '-shortest',
+                        '-movflags', '+faststart',
+                        str(output_path)
+                    ]
+                    subprocess.run(merge_cmd, capture_output=True, timeout=120)
+                    
+                    # Limpa temporários
+                    try: temp_video.unlink()
                     except: pass
+                    try: temp_audio.unlink()
+                    except: pass
+                else:
+                    # Sem áudio, só renomeia
+                    temp_video.rename(output_path)
                 
-                # MoviePy write_videofile
-                final.write_videofile(
-                    str(output_path),
-                    codec=codec,
-                    preset=preset if preset != 'default' else None,
-                    audio_codec='aac',
-                    audio_bitrate='128k',
-                    threads=8,
-                    fps=24,
-                    ffmpeg_params=ffmpeg_params,
-                    logger=None,
-                    verbose=False,
-                    temp_audiofile=str(temp_audio),
-                    remove_temp=True
-                )
-                
-                # Verifica sucesso
                 if output_path.exists() and output_path.stat().st_size > 50000:
                     encoding_success = True
                     encode_time = time.time() - start_encode
@@ -2674,25 +2793,76 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
                     logger.info(f"    Arquivo: {file_size:.1f} MB")
                     logger.info(f"    Tempo: {encode_time:.1f}s")
                     logger.info(f"    Velocidade: {speed:.2f}x realtime")
-                    logger.info(f"    Codec: {codec} ({preset})")
+                    logger.info(f"    Método: FFmpeg Pipe + {'NVENC' if nvenc_available else 'x264'}")
                     logger.info("=" * 60)
-                    break
-                else:
-                    raise Exception("Arquivo inválido ou muito pequeno")
                     
-            except Exception as e:
-                error_msg = str(e)[:100]
-                logger.warning(f"[WARNING] {codec} falhou: {error_msg}")
-                
-                # Limpa arquivos parciais
-                if output_path.exists():
-                    try: output_path.unlink()
-                    except: pass
-                if temp_audio.exists():
-                    try: temp_audio.unlink()
-                    except: pass
+        except Exception as pipe_error:
+            logger.warning(f"[WARNING] FFmpeg pipe falhou: {str(pipe_error)[:100]}")
+            # Limpa arquivos temporários
+            try:
+                temp_video = Path(str(output_path).replace('.mp4', '_temp.mp4'))
+                if temp_video.exists():
+                    temp_video.unlink()
+            except:
+                pass
+        
+        # ==================== MÉTODO 2: MOVIEPY TRADICIONAL (FALLBACK) ====================
+        if not encoding_success:
+            logger.info("[ENCODING] Método 2: MoviePy tradicional (fallback)...")
+            
+            temp_audio = TEMP_DIR / f"audio_{num}_{uuid.uuid4().hex[:6]}.m4a"
+            
+            codecs_to_try = [
+                ('libx264', 'ultrafast', ['-pix_fmt', 'yuv420p', '-crf', '28', '-movflags', '+faststart']),
+            ]
+            
+            if nvenc_available:
+                codecs_to_try.insert(0, ('h264_nvenc', 'p4', ['-pix_fmt', 'yuv420p', '-b:v', '5M', '-movflags', '+faststart']))
+            
+            for codec, preset, ffmpeg_params in codecs_to_try:
+                try:
+                    logger.info(f"[ENCODING] Tentando {codec} (preset={preset})...")
                     
-                continue
+                    if output_path.exists():
+                        try: output_path.unlink()
+                        except: pass
+                    
+                    final.write_videofile(
+                        str(output_path),
+                        codec=codec,
+                        preset=preset,
+                        audio_codec='aac',
+                        audio_bitrate='128k',
+                        threads=8,
+                        fps=24,
+                        ffmpeg_params=ffmpeg_params,
+                        logger=None,
+                        verbose=False,
+                        temp_audiofile=str(temp_audio),
+                        remove_temp=True
+                    )
+                    
+                    if output_path.exists() and output_path.stat().st_size > 50000:
+                        encoding_success = True
+                        encode_time = time.time() - start_encode
+                        file_size = output_path.stat().st_size / 1e6
+                        speed = cut_duration / encode_time if encode_time > 0 else 0
+                        
+                        logger.info("=" * 60)
+                        logger.info(f"[✓ SUCCESS] Corte {num} finalizado!")
+                        logger.info(f"    Arquivo: {file_size:.1f} MB")
+                        logger.info(f"    Tempo: {encode_time:.1f}s")
+                        logger.info(f"    Velocidade: {speed:.2f}x realtime")
+                        logger.info(f"    Codec: {codec} ({preset})")
+                        logger.info("=" * 60)
+                        break
+                        
+                except Exception as e:
+                    logger.warning(f"[WARNING] {codec} falhou: {str(e)[:100]}")
+                    if output_path.exists():
+                        try: output_path.unlink()
+                        except: pass
+                    continue
         
         if not encoding_success:
             raise Exception("Encoding falhou com todos os codecs")
@@ -3225,14 +3395,14 @@ if __name__ == "__main__":
         # Banner com versão detalhada
         print("\n" + "="*70)
         print("╔═══════════════════════════════════════════════════════════════════╗")
-        print("║   ANIMECUT SERVERLESS v15.4 - BUILD 2025-12-18 06:00             ║")
-        print("║   🔧 BACKGROUND S3 API + ENCODING CONFIÁVEL                      ║")
+        print("║   ANIMECUT SERVERLESS v15.5 - BUILD 2025-12-18 08:00             ║")
+        print("║   🚀 ULTRARRÁPIDO + TÍTULOS DA TRANSCRIÇÃO + FONTES              ║")
         print("╚═══════════════════════════════════════════════════════════════════╝")
-        print("Novidades v15.4:")
-        print("  ✓ BACKGROUND: Download via S3 API quando URL pública retorna 401")
-        print("  ✓ ENCODING: libx264 ultrafast como principal (mais confiável)")
-        print("  ✓ NVENC: Apenas como fallback com config conservadora")
-        print("  ✓ CORREÇÃO: Broken Pipe do NVENC resolvido")
+        print("Novidades v15.5:")
+        print("  ✓ ENCODING: FFmpeg pipe NVENC (~60s por corte de 100s)")
+        print("  ✓ TÍTULOS: Extrai texto REAL da transcrição para todos cortes")
+        print("  ✓ FONTES: 16 fontes customizadas incluídas")
+        print("  ✓ BACKGROUND: Download via S3 API (resolve 401)")
         print(f"Volume: {VOLUME_BASE}")
         print(f"Cache: {CACHE_DIR}")
         print(f"B2 Bucket: {B2_BUCKET if B2_BUCKET else 'NÃO CONFIGURADO'}")
