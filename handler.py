@@ -7,7 +7,7 @@ Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1
 CORREÇÕES: Força KortexClipAI2 mesmo com variável ambiente errada
 """
 
-# ==================== IMPORTAÇÕES ESSENCIAIS ==================== 
+# ==================== IMPORTAÇÕES ESSENCIAIS ====================
 import os
 import sys
 import logging
@@ -1951,38 +1951,151 @@ def analyze_video_content_gpu(
             return False
         
         def extract_title_from_text(text, moment_type, index):
-            """Extrai título único baseado no texto do momento - SEM RETICÊNCIAS"""
-            if not text or text.startswith("["):
-                # Para ação ou texto vazio
-                action_titles = [
-                    "MOMENTO ÉPICO!",
-                    "BATALHA INTENSA!",
-                    "CENA EXPLOSIVA!",
-                    "CONFRONTO DECISIVO!",
-                    "PODER MÁXIMO!",
-                    "HORA DA VERDADE!",
-                    "DESPERTAR!",
-                    "LIMITE SUPERADO!"
-                ]
-                return action_titles[index % len(action_titles)]
+            """
+            Extrai título CHAMATIVO e MAGNÉTICO baseado no texto do momento
+            
+            v15.1: Títulos mais impactantes, nunca genéricos
+            """
+            
+            # Templates de títulos magnéticos por tipo de cena
+            action_titles = [
+                "A BATALHA QUE MUDOU TUDO!",
+                "PODER ALÉM DO LIMITE!",
+                "O MOMENTO DECISIVO!",
+                "EXPLOSÃO DE PODER!",
+                "CONFRONTO ÉPICO!",
+                "A HORA DA VERDADE!",
+                "DESPERTA O VERDADEIRO PODER!",
+                "NUNCA DESISTA!",
+                "SUPERANDO O IMPOSSÍVEL!",
+                "O GUERREIRO DESPERTA!"
+            ]
+            
+            dialogue_titles = [
+                "AS PALAVRAS QUE MUDARAM TUDO!",
+                "A REVELAÇÃO CHOCANTE!",
+                "O SEGREDO FOI REVELADO!",
+                "VOCÊ PRECISA OUVIR ISSO!",
+                "A VERDADE FINALMENTE!",
+                "DECLARAÇÃO ÉPICA!",
+                "O DISCURSO MAIS FORTE!",
+                "PALAVRAS DE UM HERÓI!",
+                "A PROMESSA INQUEBRANTÁVEL!",
+                "ISSO VAI TE EMOCIONAR!"
+            ]
+            
+            emotional_titles = [
+                "ISSO VAI TE FAZER CHORAR!",
+                "O MOMENTO MAIS EMOCIONANTE!",
+                "ARREPIOS GARANTIDOS!",
+                "VOCÊ NÃO ESTÁ PREPARADO!",
+                "A CENA QUE MARCOU!",
+                "EMOÇÃO PURA!",
+                "LÁGRIMAS DE UM HERÓI!",
+                "O SENTIMENTO É REAL!",
+                "CORAÇÃO APERTADO!",
+                "MOMENTO INESQUECÍVEL!"
+            ]
+            
+            humor_titles = [
+                "VOCÊ VAI RIR MUITO!",
+                "COMÉDIA PURA!",
+                "O MOMENTO MAIS ENGRAÇADO!",
+                "ISSO É HILÁRIO!",
+                "CENA MUITO BOA!",
+                "HUMOR DE QUALIDADE!",
+                "PREPARADO PARA RIR?",
+                "A PIADA DO ANO!",
+                "ISSO É MUITO BOM!",
+                "COMÉDIA GARANTIDA!"
+            ]
+            
+            # Se não há texto, usa templates por tipo
+            if not text or text.startswith("[") or len(text.strip()) < 5:
+                if moment_type == "action":
+                    return action_titles[index % len(action_titles)]
+                elif moment_type == "dialogue":
+                    return dialogue_titles[index % len(dialogue_titles)]
+                elif moment_type == "humor":
+                    return humor_titles[index % len(humor_titles)]
+                else:
+                    return emotional_titles[index % len(emotional_titles)]
             
             # Limpa e processa o texto
             text = text.strip()
             words = text.split()
             
-            # Se for muito curto, usa como está
-            if len(words) <= 4:
-                title = text.upper().rstrip(".,;:!?")
-                title += "!"  # Sempre termina com exclamação
-                return title
+            # Palavras-chave que indicam emoção/ação
+            power_words = ["poder", "força", "nunca", "sempre", "vou", "matar", "morrer", 
+                          "proteger", "salvar", "destruir", "acabar", "derrotar", "vencer",
+                          "impossível", "incrível", "forte", "fraco", "medo", "coragem"]
             
-            # Extrai frase impactante (primeiras 4-6 palavras)
-            title_words = words[:5]
-            title = " ".join(title_words).upper()
+            emotional_words = ["amo", "odeio", "amigo", "amizade", "família", "sonho",
+                              "promessa", "juramento", "lembrar", "esquecer", "perdoar"]
+            
+            # Verifica se há palavras impactantes no texto
+            text_lower = text.lower()
+            has_power = any(word in text_lower for word in power_words)
+            has_emotion = any(word in text_lower for word in emotional_words)
+            
+            # Gera título baseado no conteúdo
+            if len(words) <= 3:
+                # Texto muito curto - adiciona contexto
+                if has_power:
+                    title = f"QUANDO ELE DISSE: {text.upper()}"
+                else:
+                    title = f"\"{text.upper()}\" - ÉPICO!"
+            elif len(words) <= 6:
+                # Texto médio - usa completo com formatação
+                title = text.upper()
+            else:
+                # Texto longo - extrai a parte mais impactante
+                # Tenta encontrar uma frase de impacto
+                
+                # Procura por exclamações ou perguntas no texto original
+                sentences = text.replace("!", ".").replace("?", ".").split(".")
+                best_sentence = ""
+                
+                for sentence in sentences:
+                    sentence = sentence.strip()
+                    if len(sentence) > 5:
+                        # Prioriza frases com palavras de poder
+                        sentence_lower = sentence.lower()
+                        if any(word in sentence_lower for word in power_words + emotional_words):
+                            best_sentence = sentence
+                            break
+                        if not best_sentence:
+                            best_sentence = sentence
+                
+                if best_sentence and len(best_sentence.split()) <= 8:
+                    title = best_sentence.upper()
+                else:
+                    # Pega as primeiras 6 palavras mais impactantes
+                    title_words = words[:6]
+                    title = " ".join(title_words).upper()
             
             # Remove pontuação final e adiciona exclamação (NUNCA reticências)
-            title = title.rstrip(".,;:!?")
+            title = title.rstrip(".,;:!?\"'")
+            
+            # Garante que não seja muito curto (mínimo 3 palavras ou 15 caracteres)
+            if len(title.split()) < 3 and len(title) < 15:
+                # Adiciona contexto para títulos muito curtos
+                prefixes = [
+                    "O MOMENTO EM QUE ",
+                    "QUANDO ",
+                    "A HORA DE ",
+                    "É ASSIM QUE "
+                ]
+                title = prefixes[index % len(prefixes)] + title
+            
+            # Garante que não seja muito longo
+            if len(title) > 50:
+                words = title.split()
+                title = " ".join(words[:7])
+            
             title += "!"  # Sempre termina com exclamação
+            
+            logger.info(f"[TITULO] Gerado: '{title}' (original: '{text[:30] if text else 'vazio'}...')")
             
             return title
         
@@ -2186,7 +2299,7 @@ def moviepy_clip_context(*clips):
 def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict) -> str:
     """Processa um corte individual OTIMIZADO PARA GPU com cleanup robusto
     
-    v14.1: Títulos OBRIGATORIAMENTE personalizados baseados na transcrição
+    v15.1: Títulos CHAMATIVOS e MAGNÉTICOS + Diagnóstico completo
     """
     
     # Lista para rastrear clips a serem fechados
@@ -2196,34 +2309,69 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
         start = cut_data.get('start', 0)
         end = cut_data.get('end', start + 60)
         
-        # v14.1: Título OBRIGATÓRIO - nunca usa nome genérico do anime
-        # O título deve vir da análise de transcrição
+        # ========== LOG DE DIAGNÓSTICO DO TITLE STYLE ==========
+        title_style = config.get('titleStyle', {})
+        logger.info("=" * 60)
+        logger.info(f"[CORTE {num}] DIAGNÓSTICO DE ESTILO:")
+        logger.info(f"  titleStyle recebido: {title_style}")
+        logger.info(f"  fontSize: {title_style.get('fontSize')} (tipo: {type(title_style.get('fontSize')).__name__})")
+        logger.info(f"  textColor: {title_style.get('textColor')}")
+        logger.info(f"  strokeWidth: {title_style.get('strokeWidth')}")
+        logger.info(f"  verticalPosition: {title_style.get('verticalPosition')}")
+        logger.info("=" * 60)
+        
+        # v15.1: Título CHAMATIVO e MAGNÉTICO
         title = cut_data.get('title')
         
-        # Se não houver título personalizado, gera um baseado no tempo
-        if not title or title == config.get('animeName', 'Anime'):
-            # Gera título de emergência baseado no segmento
+        # Títulos de emergência CHAMATIVOS (não genéricos)
+        emergency_titles = [
+            "A BATALHA QUE MUDOU TUDO!",
+            "PODER ALÉM DO LIMITE!",
+            "O MOMENTO DECISIVO!",
+            "VOCÊ NÃO ESTÁ PREPARADO!",
+            "EXPLOSÃO DE PODER!",
+            "ISSO VAI TE EMOCIONAR!",
+            "A HORA DA VERDADE!",
+            "NUNCA DESISTA!",
+            "O HERÓI DESPERTA!",
+            "ARREPIOS GARANTIDOS!"
+        ]
+        
+        # Se não houver título personalizado, gera um CHAMATIVO
+        if not title or title == config.get('animeName', 'Anime') or len(title) < 5:
             original_text = cut_data.get('original_text', '')
-            if original_text and len(original_text) > 5:
-                # Usa o texto original da transcrição
-                words = original_text.split()[:5]
-                title = " ".join(words).upper()
-                title = title.rstrip(".,;:!?") + "!"  # Sempre exclamação, NUNCA reticências
-                logger.info(f"[TITULO] Gerado do texto original: {title[:30]}")
+            
+            if original_text and len(original_text) > 10:
+                # Processa o texto para criar título chamativo
+                text = original_text.strip()
+                words = text.split()
+                
+                # Palavras de impacto
+                power_words = ["poder", "força", "nunca", "sempre", "vou", "matar", 
+                              "proteger", "salvar", "destruir", "vencer", "impossível"]
+                
+                text_lower = text.lower()
+                has_power = any(word in text_lower for word in power_words)
+                
+                if has_power and len(words) >= 3:
+                    # Usa o texto com formatação impactante
+                    title_words = words[:6]
+                    title = " ".join(title_words).upper()
+                    title = title.rstrip(".,;:!?") + "!"
+                    
+                    # Se ficou muito curto, adiciona contexto
+                    if len(title) < 15:
+                        title = f"QUANDO ELE DISSE: {title}"
+                        
+                    logger.info(f"[TITULO] Gerado do texto: '{title}'")
+                else:
+                    # Usa título de emergência chamativo
+                    title = emergency_titles[num % len(emergency_titles)]
+                    logger.info(f"[TITULO] Usando título chamativo: '{title}'")
             else:
-                # Último recurso: título de impacto genérico (SEM nome do anime)
-                emergency_titles = [
-                    "MOMENTO ÉPICO!",
-                    "CENA INTENSA!",
-                    "REVELAÇÃO!",
-                    "CONFRONTO!",
-                    "DESPERTAR!",
-                    "HORA DA VERDADE!",
-                    "O LIMITE!",
-                    "EXPLOSÃO!"
-                ]
+                # Título de emergência
                 title = emergency_titles[num % len(emergency_titles)]
-                logger.warning(f"[TITULO] Usando título de emergência: {title}")
+                logger.info(f"[TITULO] Usando título de emergência: '{title}'")
         
         logger.info(f"[CUT {num}] Título: '{title}' ({start:.1f}s - {end:.1f}s)")
         
@@ -2701,6 +2849,57 @@ def handler(event):
         logger.info(f"[PROCESSING] Anime: {anime_name}")
         logger.info(f"[PROCESSING] URL: {video_url[:80]}...")
 
+        # ==================== DIAGNÓSTICO v15.1 - LOG COMPLETO DO INPUT ====================
+        logger.info("=" * 70)
+        logger.info("🔍 [DIAGNÓSTICO v15.1] DADOS RECEBIDOS DO WEBAPP")
+        logger.info("=" * 70)
+        
+        # Log de TODOS os campos recebidos
+        logger.info("[RAW INPUT] Campos presentes no input_data:")
+        for key, value in input_data.items():
+            if key == "video_url":
+                logger.info(f"  {key}: {str(value)[:50]}...")
+            elif key == "background_url":
+                logger.info(f"  {key}: {value}")  # Log COMPLETO da URL
+            elif key == "titleStyle":
+                logger.info(f"  {key}: {value}")  # Log COMPLETO do titleStyle
+            else:
+                logger.info(f"  {key}: {value}")
+        
+        # Verifica especificamente o titleStyle
+        logger.info("-" * 70)
+        logger.info("[TITLE STYLE] Análise detalhada:")
+        ts_raw = input_data.get("titleStyle")
+        logger.info(f"  Valor bruto: {ts_raw}")
+        logger.info(f"  Tipo: {type(ts_raw)}")
+        
+        if ts_raw:
+            if isinstance(ts_raw, dict):
+                logger.info(f"  fontSize bruto: {ts_raw.get('fontSize')} (tipo: {type(ts_raw.get('fontSize')).__name__})")
+                logger.info(f"  textColor: {ts_raw.get('textColor')}")
+                logger.info(f"  strokeColor: {ts_raw.get('strokeColor')}")
+                logger.info(f"  strokeWidth: {ts_raw.get('strokeWidth')} (tipo: {type(ts_raw.get('strokeWidth')).__name__})")
+                logger.info(f"  verticalPosition: {ts_raw.get('verticalPosition')}")
+                logger.info(f"  fontFamily: {ts_raw.get('fontFamily')}")
+            else:
+                logger.warning(f"  ⚠️ titleStyle NÃO é um dict! É {type(ts_raw)}")
+        else:
+            logger.warning("  ⚠️ titleStyle está VAZIO ou None!")
+        
+        # Verifica background_url
+        logger.info("-" * 70)
+        logger.info("[BACKGROUND URL] Análise detalhada:")
+        bg_url_raw = input_data.get("background_url")
+        logger.info(f"  Valor bruto: {bg_url_raw}")
+        logger.info(f"  Tipo: {type(bg_url_raw)}")
+        logger.info(f"  É string?: {isinstance(bg_url_raw, str)}")
+        logger.info(f"  Está vazio?: {not bg_url_raw or bg_url_raw == ''}")
+        if bg_url_raw:
+            logger.info(f"  Começa com https?: {str(bg_url_raw).startswith('https://')}")
+            logger.info(f"  Contém backblazeb2?: {'backblazeb2' in str(bg_url_raw).lower()}")
+            logger.info(f"  Comprimento: {len(str(bg_url_raw))} caracteres")
+        logger.info("=" * 70)
+
         # 1. Download com retry
         logger.info("[STEP 1/4] Download de vídeo...")
         video_path = download_video(video_url)
@@ -2709,16 +2908,31 @@ def handler(event):
         bg_url = input_data.get("background_url")
         bg_url = sanitize_input(bg_url, escape_html=False) if bg_url else None
         
+        logger.info("=" * 70)
+        logger.info("[BACKGROUND DOWNLOAD] Iniciando processo de download")
+        logger.info(f"  URL após sanitize: {bg_url}")
+        logger.info("=" * 70)
+        
         if bg_url:
-            logger.info(f"[BACKGROUND] URL recebida: {bg_url[:80]}...")
+            logger.info(f"[BACKGROUND] URL recebida: {bg_url}")
             bg_path = download_background(bg_url)
             if bg_path:
-                logger.info(f"[BACKGROUND] Baixado com sucesso: {bg_path}")
+                logger.info(f"[BACKGROUND] ✓ Baixado com sucesso: {bg_path}")
+                # Verifica se o arquivo existe e tem tamanho
+                try:
+                    from pathlib import Path
+                    bg_file = Path(bg_path)
+                    if bg_file.exists():
+                        logger.info(f"[BACKGROUND] ✓ Arquivo existe, tamanho: {bg_file.stat().st_size} bytes")
+                    else:
+                        logger.warning(f"[BACKGROUND] ⚠️ Arquivo NÃO existe no path: {bg_path}")
+                except Exception as e:
+                    logger.warning(f"[BACKGROUND] Erro ao verificar arquivo: {e}")
             else:
-                logger.warning("[BACKGROUND] Falha ao baixar background")
+                logger.warning("[BACKGROUND] ✗ Falha ao baixar background - download_background retornou None")
         else:
             bg_path = None
-            logger.info("[BACKGROUND] Nenhuma URL de background fornecida")
+            logger.warning("[BACKGROUND] ⚠️ Nenhuma URL de background fornecida (bg_url é None ou vazio)")
         
         # Configuração v12.8 - COMPLETA
         # Anti-shadowban pode ser boolean (retrocompatível) ou objeto detalhado
@@ -3040,15 +3254,14 @@ if __name__ == "__main__":
         # Banner com versão detalhada
         print("\n" + "="*70)
         print("╔═══════════════════════════════════════════════════════════════════╗")
-        print("║   ANIMECUT SERVERLESS v15.0 - BUILD 2025-12-17 21:00             ║")
-        print("║   NVENC FORÇADO + GPU MÁXIMA + ENCODING RÁPIDO                   ║")
+        print("║   ANIMECUT SERVERLESS v15.1 - BUILD 2025-12-17 23:00             ║")
+        print("║   TÍTULOS MAGNÉTICOS + DIAGNÓSTICO COMPLETO + NVENC              ║")
         print("╚═══════════════════════════════════════════════════════════════════╝")
-        print("Novidades v15.0:")
-        print("  ✓ NVENC FORÇADO: Encoding via GPU (não cai mais para CPU)")
-        print("  ✓ FFmpeg DIRETO: Controle total sobre encoding")
-        print("  ✓ HWACCEL CUDA: Aceleração por hardware ativada")
-        print("  ✓ LOGS DETALHADOS: Mostra se está usando GPU ou CPU")
-        print("  ✓ TÍTULOS SEM RETICÊNCIAS: Sempre termina com '!'")
+        print("Novidades v15.1:")
+        print("  ✓ TÍTULOS MAGNÉTICOS: Chamativos e contextuais")
+        print("  ✓ DIAGNÓSTICO COMPLETO: Log detalhado do titleStyle e background")
+        print("  ✓ NVENC FORÇADO: Encoding na GPU")
+        print("  ✓ LOG DE INPUT: Mostra TUDO que chega do webapp")
         print(f"Volume: {VOLUME_BASE}")
         print(f"Cache: {CACHE_DIR}")
         print(f"B2 Bucket: {B2_BUCKET if B2_BUCKET else 'NÃO CONFIGURADO'}")
