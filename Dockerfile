@@ -1,24 +1,26 @@
-# ✂️ AnimeCut Serverless V14.2 - TÍTULOS SEM RETICÊNCIAS + FONTE GRANDE
-# NOVIDADES: Títulos sem reticências, tamanho de fonte aplicado, diagnóstico
+# ✂️ AnimeCut Serverless V15.0 - NVENC FORÇADO + GPU MÁXIMA
+# NOVIDADES: Encoding NVENC forçado, FFmpeg direto, aceleração CUDA
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 # ==================== CACHE BUSTER ====================
 # IMPORTANTE: Mude este valor para forçar rebuild completo no RunPod
-ARG CACHEBUST=20251217_0800_V14_2_NO_ELLIPSIS
+ARG CACHEBUST=20251217_2100_V15_0_NVENC_FORCED
 RUN echo "Build timestamp: ${CACHEBUST}" > /BUILD_INFO && \
-    echo "V14.2 - TÍTULOS SEM RETICÊNCIAS + FONTE GRANDE" >> /BUILD_INFO
+    echo "V15.0 - NVENC FORÇADO + GPU MÁXIMA" >> /BUILD_INFO
 
 WORKDIR /app
 
 # Variáveis de Ambiente
-ENV BUILD_VERSION="14.2"
-ENV BUILD_DATE="2025-12-17T08:00:00Z"
+ENV BUILD_VERSION="15.0"
+ENV BUILD_DATE="2025-12-17T21:00:00Z"
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
 ENV CUDA_VISIBLE_DEVICES="0"
 ENV TF_CPP_MIN_LOG_LEVEL="3"
 ENV PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:512"
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
 
 # ==================== 1. DEPENDÊNCIAS DE SISTEMA + cuDNN 9 ====================
 # Instala cuDNN 9.x que é necessário para ctranslate2/faster-whisper recentes
@@ -120,17 +122,20 @@ RUN python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 
 # ==================== 14. HANDLER - SEMPRE ATUALIZADO ====================
 # Este ARG invalida o cache para SEMPRE copiar o handler mais recente
-ARG HANDLER_VERSION=14.2_20251217_0800_NO_ELLIPSIS
+ARG HANDLER_VERSION=15.0_20251217_2100_NVENC_FORCED
 RUN echo "Handler version: ${HANDLER_VERSION}"
 
 # Copia handler (NUNCA usa cache devido ao ARG acima)
 COPY handler.py .
 
 # Mostra versão no build log
-RUN echo "=== BUILD COMPLETO v14.2 ===" && \
+RUN echo "=== BUILD COMPLETO v15.0 ===" && \
     echo "Handler: ${HANDLER_VERSION}" && \
-    echo "Novidades: Títulos sem reticências, Fonte grande, Diagnóstico" && \
+    echo "Novidades: NVENC Forçado, GPU Máxima, Encoding Rápido" && \
     head -10 handler.py
+
+# Verifica se NVENC está disponível no build
+RUN ffmpeg -encoders 2>/dev/null | grep nvenc || echo "NVENC será verificado em runtime"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
