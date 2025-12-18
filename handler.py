@@ -2398,104 +2398,185 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
         output_filename = f"cut_{num}_{safe_title}_{uuid.uuid4().hex[:6]}.mp4"
         output_path = OUTPUT_DIR / output_filename
         
-        # ==================== ENCODING v12.5 - DEFINITIVO ====================
-        # Detecta se NVENC está disponível
+        # ==================== ENCODING v15.0 - NVENC FORÇADO ====================
+        # MUDANÇA PRINCIPAL: Usa FFmpeg diretamente ao invés de MoviePy para encoding
+        # Isso garante controle total sobre NVENC e evita fallback silencioso para CPU
+        
+        logger.info("=" * 60)
+        logger.info("[ENCODING v15.0] INICIANDO RENDERIZAÇÃO")
+        logger.info("=" * 60)
+        
+        # Detecta NVENC
         nvenc_available = False
-        if GPU_AVAILABLE and FFMPEG_AVAILABLE:
+        nvenc_check_cmd = ['ffmpeg', '-hide_banner', '-encoders']
+        try:
+            result = subprocess.run(nvenc_check_cmd, capture_output=True, text=True, timeout=10)
+            nvenc_available = 'h264_nvenc' in result.stdout
+            logger.info(f"[NVENC] Disponível: {'✓ SIM' if nvenc_available else '✗ NÃO'}")
+        except Exception as e:
+            logger.warning(f"[NVENC] Erro ao verificar: {e}")
+        
+        # Verifica GPU
+        if GPU_AVAILABLE and torch:
             try:
-                result = subprocess.run(
-                    ['ffmpeg', '-encoders'],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                nvenc_available = 'h264_nvenc' in result.stdout
+                gpu_name = torch.cuda.get_device_name(0)
+                gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+                gpu_used = torch.cuda.memory_allocated(0) / 1e9
+                logger.info(f"[GPU] {gpu_name}")
+                logger.info(f"[GPU] VRAM: {gpu_used:.1f}GB / {gpu_mem:.1f}GB")
             except:
                 pass
         
-        # Lista de codecs para tentar (NVENC primeiro se disponível, depois libx264)
-        codecs_to_try = []
-        if nvenc_available:
-            codecs_to_try.append('h264_nvenc')
-        codecs_to_try.append('libx264')
+        # ESTRATÉGIA v15.0:
+        # 1. Exporta vídeo RAW do MoviePy (sem compressão, muito rápido)
+        # 2. Usa FFmpeg com NVENC para encoding final (na GPU)
         
-        encoding_success = False
-        last_error = None
+        temp_raw = TEMP_DIR / f"raw_{num}_{uuid.uuid4().hex[:6]}.avi"
+        temp_audio = TEMP_DIR / f"audio_{num}_{uuid.uuid4().hex[:6]}.aac"
         
-        for codec in codecs_to_try:
-            try:
-                # Parâmetros base (sempre usados)
-                ffmpeg_params = [
-                    '-pix_fmt', 'yuv420p',
-                    '-movflags', '+faststart'
+        try:
+            # Passo 1: Exporta vídeo RAW (sem encoding, super rápido)
+            logger.info("[STEP 1/3] Exportando frames RAW...")
+            start_export = time.time()
+            
+            final.write_videofile(
+                str(temp_raw),
+                codec='rawvideo',  # SEM compressão = muito rápido
+                audio=False,       # Áudio separado
+                preset='ultrafast',
+                threads=8,
+                logger=None,
+                verbose=False
+            )
+            
+            export_time = time.time() - start_export
+            logger.info(f"[STEP 1/3] Frames exportados em {export_time:.1f}s")
+            
+            # Passo 2: Exporta áudio
+            logger.info("[STEP 2/3] Exportando áudio...")
+            if final.audio:
+                final.audio.write_audiofile(
+                    str(temp_audio),
+                    codec='aac',
+                    bitrate='192k',
+                    logger=None,
+                    verbose=False
+                )
+            
+            # Passo 3: Encoding com NVENC (GPU)
+            logger.info("[STEP 3/3] Encoding NVENC (GPU)...")
+            start_encode = time.time()
+            
+            if nvenc_available:
+                # NVENC - ENCODING NA GPU
+                ffmpeg_cmd = [
+                    'ffmpeg', '-y',
+                    '-hwaccel', 'cuda',           # Aceleração por hardware
+                    '-hwaccel_output_format', 'cuda',
+                    '-i', str(temp_raw),          # Vídeo RAW
                 ]
                 
-                if codec == 'h264_nvenc':
-                    # NVENC - parâmetros MÍNIMOS e SEGUROS para FFmpeg 4.4.2
-                    # NÃO usar: -rc, -rc:v, -cq, -cq:v, -spatial-aq, -temporal-aq
-                    # Esses parâmetros causam erros no FFmpeg 4.4.2
-                    preset = 'p4'
-                    ffmpeg_params.extend([
-                        '-b:v', '8M',
-                        '-maxrate', '12M',
-                        '-bufsize', '24M'
-                    ])
-                    logger.info(f"[ENCODING] Tentando NVENC (GPU)...")
+                # Adiciona áudio se existir
+                if temp_audio.exists():
+                    ffmpeg_cmd.extend(['-i', str(temp_audio)])
+                
+                ffmpeg_cmd.extend([
+                    '-c:v', 'h264_nvenc',         # CODEC GPU
+                    '-preset', 'p4',              # Preset balanceado (p1=lento/qualidade, p7=rápido)
+                    '-rc', 'vbr',                 # Variable bitrate
+                    '-cq', '23',                  # Qualidade (menor = melhor)
+                    '-b:v', '8M',                 # Bitrate alvo
+                    '-maxrate', '12M',            # Máximo
+                    '-bufsize', '24M',            # Buffer
+                    '-profile:v', 'high',
+                    '-pix_fmt', 'yuv420p',
+                    '-movflags', '+faststart',
+                ])
+                
+                if temp_audio.exists():
+                    ffmpeg_cmd.extend(['-c:a', 'copy'])  # Copia áudio (já é AAC)
                 else:
-                    # libx264 - CPU encoding
-                    preset = 'medium'
-                    ffmpeg_params.extend([
-                        '-crf', '23',
-                        '-tune', 'film',
-                        '-profile:v', 'high',
-                        '-level', '4.0'
-                    ])
-                    logger.info(f"[ENCODING] Usando libx264 (CPU)...")
+                    ffmpeg_cmd.extend(['-an'])  # Sem áudio
                 
-                logger.info(f"[RENDERING] {output_filename} com {codec}...")
-                temp_audio = TEMP_DIR / f"temp_audio_{num}_{uuid.uuid4().hex[:6]}.m4a"
+                ffmpeg_cmd.append(str(output_path))
                 
-                final.write_videofile(
-                    str(output_path),
-                    codec=codec,
-                    audio_codec='aac',
-                    audio_bitrate='192k',
-                    preset=preset,
-                    threads=4,
-                    ffmpeg_params=ffmpeg_params,
-                    logger=None,
-                    verbose=False,
-                    temp_audiofile=str(temp_audio),
-                    remove_temp=True
+                logger.info(f"[NVENC] Comando: {' '.join(ffmpeg_cmd[:10])}...")
+                
+                # Executa FFmpeg com NVENC
+                process = subprocess.run(
+                    ffmpeg_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 minutos máximo por corte
                 )
                 
-                # Valida saída
-                if output_path.exists() and output_path.stat().st_size > 100000:
-                    encoding_success = True
-                    file_size = output_path.stat().st_size / 1e6
-                    logger.info(f"[SUCCESS] Corte {num} finalizado ({file_size:.1f} MB) - Codec: {codec}")
-                    break
+                if process.returncode != 0:
+                    logger.warning(f"[NVENC] Erro: {process.stderr[-500:]}")
+                    raise Exception("NVENC falhou")
+                
+                encode_time = time.time() - start_encode
+                logger.info(f"[NVENC] ✓ Encoding GPU concluído em {encode_time:.1f}s")
+                
+            else:
+                # Fallback: libx264 (CPU) - mas com aviso
+                logger.warning("=" * 60)
+                logger.warning("[WARNING] NVENC NÃO DISPONÍVEL - USANDO CPU!")
+                logger.warning("Isso é MUITO mais lento. Verifique drivers NVIDIA.")
+                logger.warning("=" * 60)
+                
+                ffmpeg_cmd = [
+                    'ffmpeg', '-y',
+                    '-i', str(temp_raw),
+                ]
+                
+                if temp_audio.exists():
+                    ffmpeg_cmd.extend(['-i', str(temp_audio)])
+                
+                ffmpeg_cmd.extend([
+                    '-c:v', 'libx264',
+                    '-preset', 'fast',
+                    '-crf', '23',
+                    '-profile:v', 'high',
+                    '-pix_fmt', 'yuv420p',
+                    '-movflags', '+faststart',
+                ])
+                
+                if temp_audio.exists():
+                    ffmpeg_cmd.extend(['-c:a', 'copy'])
                 else:
-                    raise Exception("Arquivo de saída inválido ou muito pequeno")
-                    
-            except Exception as e:
-                last_error = e
-                logger.warning(f"[WARNING] Encoding com {codec} falhou: {str(e)[:100]}")
+                    ffmpeg_cmd.extend(['-an'])
                 
-                # Limpa arquivo parcial
-                if output_path.exists():
-                    try:
-                        output_path.unlink()
-                    except:
-                        pass
+                ffmpeg_cmd.append(str(output_path))
                 
-                # Se há mais codecs para tentar, continua
-                if codec != codecs_to_try[-1]:
-                    logger.info("[FALLBACK] Tentando próximo codec...")
-                    continue
-        
-        if not encoding_success:
-            raise Exception(f"Encoding falhou com todos os codecs: {last_error}")
+                process = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=600)
+                
+                if process.returncode != 0:
+                    raise Exception(f"libx264 falhou: {process.stderr[-200:]}")
+                
+                encode_time = time.time() - start_encode
+                logger.info(f"[CPU] Encoding concluído em {encode_time:.1f}s")
+            
+            # Valida saída
+            if output_path.exists() and output_path.stat().st_size > 100000:
+                file_size = output_path.stat().st_size / 1e6
+                total_time = export_time + encode_time
+                logger.info("=" * 60)
+                logger.info(f"[SUCCESS] Corte {num} finalizado!")
+                logger.info(f"  Arquivo: {file_size:.1f} MB")
+                logger.info(f"  Tempo total: {total_time:.1f}s")
+                logger.info(f"  Codec: {'NVENC (GPU)' if nvenc_available else 'libx264 (CPU)'}")
+                logger.info("=" * 60)
+            else:
+                raise Exception("Arquivo de saída inválido")
+                
+        finally:
+            # Limpa arquivos temporários
+            for temp_file in [temp_raw, temp_audio]:
+                try:
+                    if temp_file.exists():
+                        temp_file.unlink()
+                except:
+                    pass
 
         return str(output_path)
         
@@ -2959,15 +3040,15 @@ if __name__ == "__main__":
         # Banner com versão detalhada
         print("\n" + "="*70)
         print("╔═══════════════════════════════════════════════════════════════════╗")
-        print("║   ANIMECUT SERVERLESS v14.2 - BUILD 2025-12-17 08:00             ║")
-        print("║   TÍTULOS SEM RETICÊNCIAS + FONTE GRANDE + BG DIAGNÓSTICO        ║")
+        print("║   ANIMECUT SERVERLESS v15.0 - BUILD 2025-12-17 21:00             ║")
+        print("║   NVENC FORÇADO + GPU MÁXIMA + ENCODING RÁPIDO                   ║")
         print("╚═══════════════════════════════════════════════════════════════════╝")
-        print("Novidades v14.2:")
-        print("  ✓ TÍTULOS SEM RETICÊNCIAS: Sempre termina com '!' (exclamação)")
-        print("  ✓ TAMANHO DE FONTE: Agora aplica corretamente o tamanho escolhido")
-        print("  ✓ LOGS DE DIAGNÓSTICO: Mostra parâmetros recebidos")
-        print("  ✓ SEM LIMITE DE CORTES: IA decide quantos cortes gerar")
-        print("  ✓ CORTE MOLDURA: 16:9 centralizado sobre 9:16")
+        print("Novidades v15.0:")
+        print("  ✓ NVENC FORÇADO: Encoding via GPU (não cai mais para CPU)")
+        print("  ✓ FFmpeg DIRETO: Controle total sobre encoding")
+        print("  ✓ HWACCEL CUDA: Aceleração por hardware ativada")
+        print("  ✓ LOGS DETALHADOS: Mostra se está usando GPU ou CPU")
+        print("  ✓ TÍTULOS SEM RETICÊNCIAS: Sempre termina com '!'")
         print(f"Volume: {VOLUME_BASE}")
         print(f"Cache: {CACHE_DIR}")
         print(f"B2 Bucket: {B2_BUCKET if B2_BUCKET else 'NÃO CONFIGURADO'}")
