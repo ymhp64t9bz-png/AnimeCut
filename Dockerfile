@@ -1,18 +1,18 @@
-# ✂️ AnimeCut Serverless V15.5c - ULTRARRÁPIDO + TÍTULOS + FONTES
-# NOVIDADES: FFmpeg pipe NVENC, títulos da transcrição, fontes customizadas
+# ✂️ AnimeCut Serverless V15.6 - NVENC FORÇADO + TÍTULOS ÚNICOS
+# NOVIDADES: NVENC prioridade, títulos 100% únicos, fontes customizadas
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 # ==================== CACHE BUSTER ====================
 # IMPORTANTE: Mude este valor para forçar rebuild completo no RunPod
-ARG CACHEBUST=20251218_0930_V15_5C_FONTES_FOLDER
+ARG CACHEBUST=20251218_1000_V15_6_NVENC_UNIQUE_TITLES
 RUN echo "Build timestamp: ${CACHEBUST}" > /BUILD_INFO && \
-    echo "V15.5c - ULTRARRÁPIDO + TÍTULOS + FONTES CUSTOMIZADAS" >> /BUILD_INFO
+    echo "V15.6 - NVENC FORÇADO + TÍTULOS ÚNICOS + FONTES" >> /BUILD_INFO
 
 WORKDIR /app
 
 # Variáveis de Ambiente
-ENV BUILD_VERSION="15.5c"
-ENV BUILD_DATE="2025-12-18T09:30:00Z"
+ENV BUILD_VERSION="15.6"
+ENV BUILD_DATE="2025-12-18T10:00:00Z"
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
@@ -22,7 +22,7 @@ ENV PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:512"
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
 
-# ==================== 1. DEPENDÊNCIAS DE SISTEMA + cuDNN 9 ===================
+# ==================== 1. DEPENDÊNCIAS DE SISTEMA + cuDNN 9 ====================
 # Instala cuDNN 9.x que é necessário para ctranslate2/faster-whisper recentes
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -152,16 +152,16 @@ RUN mkdir -p /usr/local/share/fonts/custom && \
 
 # ==================== 15. HANDLER - SEMPRE ATUALIZADO ====================
 # Este ARG invalida o cache para SEMPRE copiar o handler mais recente
-ARG HANDLER_VERSION=15.5c_20251218_0930_FONTES_FOLDER
+ARG HANDLER_VERSION=15.6_20251218_1000_NVENC_UNIQUE_TITLES
 RUN echo "Handler version: ${HANDLER_VERSION}"
 
 # Copia handler (NUNCA usa cache devido ao ARG acima)
 COPY handler.py .
 
 # Mostra versão no build log
-RUN echo "=== BUILD COMPLETO v15.5c ===" && \
+RUN echo "=== BUILD COMPLETO v15.6 ===" && \
     echo "Handler: ${HANDLER_VERSION}" && \
-    echo "Novidades: FFmpeg pipe NVENC, títulos da transcrição, fontes customizadas" && \
+    echo "Novidades: NVENC forçado, títulos únicos, fontes customizadas" && \
     echo "Fontes disponíveis:" && \
     ls -la /workspace/fonts/ && \
     head -10 handler.py
