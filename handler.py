@@ -1952,151 +1952,93 @@ def analyze_video_content_gpu(
         
         def extract_title_from_text(text, moment_type, index):
             """
-            Extrai título CHAMATIVO e MAGNÉTICO baseado no texto do momento
-            
-            v15.1: Títulos mais impactantes, nunca genéricos
+            v15.2: SEMPRE gera título baseado no TEXTO REAL da transcrição
+            NUNCA usa títulos genéricos quando há texto disponível
             """
             
-            # Templates de títulos magnéticos por tipo de cena
-            action_titles = [
-                "A BATALHA QUE MUDOU TUDO!",
-                "PODER ALÉM DO LIMITE!",
-                "O MOMENTO DECISIVO!",
-                "EXPLOSÃO DE PODER!",
-                "CONFRONTO ÉPICO!",
-                "A HORA DA VERDADE!",
-                "DESPERTA O VERDADEIRO PODER!",
-                "NUNCA DESISTA!",
-                "SUPERANDO O IMPOSSÍVEL!",
-                "O GUERREIRO DESPERTA!"
-            ]
-            
-            dialogue_titles = [
-                "AS PALAVRAS QUE MUDARAM TUDO!",
-                "A REVELAÇÃO CHOCANTE!",
-                "O SEGREDO FOI REVELADO!",
-                "VOCÊ PRECISA OUVIR ISSO!",
-                "A VERDADE FINALMENTE!",
-                "DECLARAÇÃO ÉPICA!",
-                "O DISCURSO MAIS FORTE!",
-                "PALAVRAS DE UM HERÓI!",
-                "A PROMESSA INQUEBRANTÁVEL!",
-                "ISSO VAI TE EMOCIONAR!"
-            ]
-            
-            emotional_titles = [
-                "ISSO VAI TE FAZER CHORAR!",
-                "O MOMENTO MAIS EMOCIONANTE!",
-                "ARREPIOS GARANTIDOS!",
-                "VOCÊ NÃO ESTÁ PREPARADO!",
-                "A CENA QUE MARCOU!",
-                "EMOÇÃO PURA!",
-                "LÁGRIMAS DE UM HERÓI!",
-                "O SENTIMENTO É REAL!",
-                "CORAÇÃO APERTADO!",
-                "MOMENTO INESQUECÍVEL!"
-            ]
-            
-            humor_titles = [
-                "VOCÊ VAI RIR MUITO!",
-                "COMÉDIA PURA!",
-                "O MOMENTO MAIS ENGRAÇADO!",
-                "ISSO É HILÁRIO!",
-                "CENA MUITO BOA!",
-                "HUMOR DE QUALIDADE!",
-                "PREPARADO PARA RIR?",
-                "A PIADA DO ANO!",
-                "ISSO É MUITO BOM!",
-                "COMÉDIA GARANTIDA!"
-            ]
-            
-            # Se não há texto, usa templates por tipo
-            if not text or text.startswith("[") or len(text.strip()) < 5:
-                if moment_type == "action":
-                    return action_titles[index % len(action_titles)]
-                elif moment_type == "dialogue":
-                    return dialogue_titles[index % len(dialogue_titles)]
-                elif moment_type == "humor":
-                    return humor_titles[index % len(humor_titles)]
-                else:
-                    return emotional_titles[index % len(emotional_titles)]
-            
-            # Limpa e processa o texto
-            text = text.strip()
-            words = text.split()
-            
-            # Palavras-chave que indicam emoção/ação
-            power_words = ["poder", "força", "nunca", "sempre", "vou", "matar", "morrer", 
-                          "proteger", "salvar", "destruir", "acabar", "derrotar", "vencer",
-                          "impossível", "incrível", "forte", "fraco", "medo", "coragem"]
-            
-            emotional_words = ["amo", "odeio", "amigo", "amizade", "família", "sonho",
-                              "promessa", "juramento", "lembrar", "esquecer", "perdoar"]
-            
-            # Verifica se há palavras impactantes no texto
-            text_lower = text.lower()
-            has_power = any(word in text_lower for word in power_words)
-            has_emotion = any(word in text_lower for word in emotional_words)
-            
-            # Gera título baseado no conteúdo
-            if len(words) <= 3:
-                # Texto muito curto - adiciona contexto
-                if has_power:
-                    title = f"QUANDO ELE DISSE: {text.upper()}"
-                else:
-                    title = f"\"{text.upper()}\" - ÉPICO!"
-            elif len(words) <= 6:
-                # Texto médio - usa completo com formatação
-                title = text.upper()
-            else:
-                # Texto longo - extrai a parte mais impactante
-                # Tenta encontrar uma frase de impacto
+            # Se tem texto da transcrição, USA ELE
+            if text and not text.startswith("[") and len(text.strip()) > 5:
+                # Limpa o texto
+                text = text.strip()
                 
-                # Procura por exclamações ou perguntas no texto original
-                sentences = text.replace("!", ".").replace("?", ".").split(".")
-                best_sentence = ""
+                # Remove tags e caracteres especiais
+                text = text.replace("[", "").replace("]", "")
                 
-                for sentence in sentences:
-                    sentence = sentence.strip()
-                    if len(sentence) > 5:
-                        # Prioriza frases com palavras de poder
-                        sentence_lower = sentence.lower()
-                        if any(word in sentence_lower for word in power_words + emotional_words):
-                            best_sentence = sentence
-                            break
-                        if not best_sentence:
-                            best_sentence = sentence
+                # Palavras de impacto que fazem títulos melhores
+                power_words = ["eu", "você", "nós", "ele", "ela", "vou", "vai", "pode", 
+                               "nunca", "sempre", "preciso", "quero", "meu", "seu",
+                               "poder", "força", "morte", "vida", "luta", "proteger"]
                 
-                if best_sentence and len(best_sentence.split()) <= 8:
-                    title = best_sentence.upper()
-                else:
-                    # Pega as primeiras 6 palavras mais impactantes
-                    title_words = words[:6]
-                    title = " ".join(title_words).upper()
+                words = text.split()
+                
+                # Tenta encontrar uma frase completa de impacto
+                if len(words) >= 3:
+                    # Se tem menos de 8 palavras, usa tudo
+                    if len(words) <= 8:
+                        title = text.upper()
+                    else:
+                        # Encontra a melhor parte da frase
+                        # Prioriza frases que começam com palavras de impacto
+                        best_start = 0
+                        for i, word in enumerate(words[:5]):
+                            if word.lower() in power_words:
+                                best_start = i
+                                break
+                        
+                        # Pega 6-8 palavras a partir do melhor início
+                        end_idx = min(best_start + 7, len(words))
+                        title_words = words[best_start:end_idx]
+                        title = " ".join(title_words).upper()
+                    
+                    # Remove pontuação do final
+                    title = title.rstrip(".,;:!?\"'")
+                    
+                    # Se ficou muito curto, adiciona contexto
+                    if len(title) < 10:
+                        title = "E ENTÃO: " + title
+                    
+                    title += "!"
+                    
+                    logger.info(f"[TITULO v15.2] Gerado do TEXTO: '{title}' (original: '{text[:40]}...')")
+                    return title
             
-            # Remove pontuação final e adiciona exclamação (NUNCA reticências)
-            title = title.rstrip(".,;:!?\"'")
-            
-            # Garante que não seja muito curto (mínimo 3 palavras ou 15 caracteres)
-            if len(title.split()) < 3 and len(title) < 15:
-                # Adiciona contexto para títulos muito curtos
-                prefixes = [
-                    "O MOMENTO EM QUE ",
-                    "QUANDO ",
-                    "A HORA DE ",
-                    "É ASSIM QUE "
+            # FALLBACK: Só usa genérico se REALMENTE não tem texto
+            # Mas agora com títulos mais chamativos
+            fallback_by_type = {
+                "action": [
+                    "ESSA CENA VAI TE SURPREENDER!",
+                    "OLHA O QUE ACONTECE AQUI!",
+                    "VOCÊ PRECISA VER ISSO!",
+                    "A CENA MAIS INTENSA!",
+                    "PREPARE-SE PARA ISSO!",
+                ],
+                "dialogue": [
+                    "ESCUTA O QUE ELE DIZ!",
+                    "ESSA FALA É ÉPICA!",
+                    "PALAVRAS PODEROSAS!",
+                    "O DISCURSO MAIS FORTE!",
+                    "ISSO MUDA TUDO!",
+                ],
+                "humor": [
+                    "ESSA É MUITO BOA!",
+                    "VAI RIR MUITO DISSO!",
+                    "COMÉDIA PURA!",
+                    "MOMENTO HILÁRIO!",
+                    "ISSO É GENIAL!",
+                ],
+                "default": [
+                    "VOCÊ NÃO ESTÁ PREPARADO!",
+                    "OLHA ESSA CENA!",
+                    "ISSO É INCRÍVEL!",
+                    "ASSISTA ATÉ O FINAL!",
+                    "A MELHOR PARTE!",
                 ]
-                title = prefixes[index % len(prefixes)] + title
+            }
             
-            # Garante que não seja muito longo
-            if len(title) > 50:
-                words = title.split()
-                title = " ".join(words[:7])
+            titles = fallback_by_type.get(moment_type, fallback_by_type["default"])
+            title = titles[index % len(titles)]
             
-            title += "!"  # Sempre termina com exclamação
-            
-            logger.info(f"[TITULO] Gerado: '{title}' (original: '{text[:30] if text else 'vazio'}...')")
-            
+            logger.warning(f"[TITULO v15.2] ⚠ Usando fallback (sem texto): '{title}'")
             return title
         
         # Processa cada momento importante
@@ -2546,25 +2488,44 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
         output_filename = f"cut_{num}_{safe_title}_{uuid.uuid4().hex[:6]}.mp4"
         output_path = OUTPUT_DIR / output_filename
         
-        # ==================== ENCODING v15.0 - NVENC FORÇADO ====================
-        # MUDANÇA PRINCIPAL: Usa FFmpeg diretamente ao invés de MoviePy para encoding
-        # Isso garante controle total sobre NVENC e evita fallback silencioso para CPU
+        # ==================== ENCODING v15.2 - NVENC DIRETO (SEM RAW) ====================
+        # MUDANÇA v15.2: Encoding DIRETO sem arquivo RAW intermediário
+        # Isso evita o problema de disco cheio (RAW consome muito espaço)
         
         logger.info("=" * 60)
-        logger.info("[ENCODING v15.0] INICIANDO RENDERIZAÇÃO")
+        logger.info("[ENCODING v15.2] INICIANDO RENDERIZAÇÃO DIRETA")
         logger.info("=" * 60)
         
         # Detecta NVENC
         nvenc_available = False
-        nvenc_check_cmd = ['ffmpeg', '-hide_banner', '-encoders']
         try:
-            result = subprocess.run(nvenc_check_cmd, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(['ffmpeg', '-hide_banner', '-encoders'], 
+                                   capture_output=True, text=True, timeout=10)
             nvenc_available = 'h264_nvenc' in result.stdout
             logger.info(f"[NVENC] Disponível: {'✓ SIM' if nvenc_available else '✗ NÃO'}")
         except Exception as e:
             logger.warning(f"[NVENC] Erro ao verificar: {e}")
         
-        # Verifica GPU
+        # Verifica espaço em disco
+        try:
+            import shutil
+            disk_usage = shutil.disk_usage(TEMP_DIR)
+            free_gb = disk_usage.free / (1024**3)
+            logger.info(f"[DISCO] Espaço livre: {free_gb:.1f} GB")
+            
+            if free_gb < 2:
+                logger.warning(f"[DISCO] ⚠ Pouco espaço livre! Limpando temp...")
+                # Limpa arquivos temporários antigos
+                for f in TEMP_DIR.glob("*.avi"):
+                    try: f.unlink()
+                    except: pass
+                for f in TEMP_DIR.glob("*.wav"):
+                    try: f.unlink()
+                    except: pass
+        except:
+            pass
+        
+        # Log de GPU
         if GPU_AVAILABLE and torch:
             try:
                 gpu_name = torch.cuda.get_device_name(0)
@@ -2575,156 +2536,84 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
             except:
                 pass
         
-        # ESTRATÉGIA v15.0:
-        # 1. Exporta vídeo RAW do MoviePy (sem compressão, muito rápido)
-        # 2. Usa FFmpeg com NVENC para encoding final (na GPU)
+        # ESTRATÉGIA v15.2: Encoding DIRETO (sem RAW intermediário)
+        start_encode = time.time()
+        encoding_success = False
         
-        temp_raw = TEMP_DIR / f"raw_{num}_{uuid.uuid4().hex[:6]}.avi"
-        temp_audio = TEMP_DIR / f"audio_{num}_{uuid.uuid4().hex[:6]}.aac"
+        # Lista de codecs para tentar
+        codecs_to_try = []
+        if nvenc_available:
+            codecs_to_try.append(('h264_nvenc', 'p4'))  # GPU
+        codecs_to_try.append(('libx264', 'fast'))       # CPU fallback
         
-        try:
-            # Passo 1: Exporta vídeo RAW (sem encoding, super rápido)
-            logger.info("[STEP 1/3] Exportando frames RAW...")
-            start_export = time.time()
-            
-            final.write_videofile(
-                str(temp_raw),
-                codec='rawvideo',  # SEM compressão = muito rápido
-                audio=False,       # Áudio separado
-                preset='ultrafast',
-                threads=8,
-                logger=None,
-                verbose=False
-            )
-            
-            export_time = time.time() - start_export
-            logger.info(f"[STEP 1/3] Frames exportados em {export_time:.1f}s")
-            
-            # Passo 2: Exporta áudio
-            logger.info("[STEP 2/3] Exportando áudio...")
-            if final.audio:
-                final.audio.write_audiofile(
-                    str(temp_audio),
-                    codec='aac',
-                    bitrate='192k',
+        temp_audio = TEMP_DIR / f"audio_{num}_{uuid.uuid4().hex[:6]}.m4a"
+        
+        for codec, preset in codecs_to_try:
+            try:
+                logger.info(f"[ENCODING] Tentando {codec} (preset={preset})...")
+                
+                # Parâmetros específicos por codec
+                if codec == 'h264_nvenc':
+                    ffmpeg_params = [
+                        '-pix_fmt', 'yuv420p',
+                        '-b:v', '8M',
+                        '-maxrate', '12M',
+                        '-bufsize', '24M',
+                        '-movflags', '+faststart'
+                    ]
+                else:
+                    ffmpeg_params = [
+                        '-pix_fmt', 'yuv420p',
+                        '-crf', '23',
+                        '-profile:v', 'high',
+                        '-movflags', '+faststart'
+                    ]
+                
+                # Encoding DIRETO com MoviePy
+                final.write_videofile(
+                    str(output_path),
+                    codec=codec,
+                    preset=preset,
+                    audio_codec='aac',
+                    audio_bitrate='192k',
+                    threads=8,
+                    ffmpeg_params=ffmpeg_params,
                     logger=None,
-                    verbose=False
-                )
-            
-            # Passo 3: Encoding com NVENC (GPU)
-            logger.info("[STEP 3/3] Encoding NVENC (GPU)...")
-            start_encode = time.time()
-            
-            if nvenc_available:
-                # NVENC - ENCODING NA GPU
-                ffmpeg_cmd = [
-                    'ffmpeg', '-y',
-                    '-hwaccel', 'cuda',           # Aceleração por hardware
-                    '-hwaccel_output_format', 'cuda',
-                    '-i', str(temp_raw),          # Vídeo RAW
-                ]
-                
-                # Adiciona áudio se existir
-                if temp_audio.exists():
-                    ffmpeg_cmd.extend(['-i', str(temp_audio)])
-                
-                ffmpeg_cmd.extend([
-                    '-c:v', 'h264_nvenc',         # CODEC GPU
-                    '-preset', 'p4',              # Preset balanceado (p1=lento/qualidade, p7=rápido)
-                    '-rc', 'vbr',                 # Variable bitrate
-                    '-cq', '23',                  # Qualidade (menor = melhor)
-                    '-b:v', '8M',                 # Bitrate alvo
-                    '-maxrate', '12M',            # Máximo
-                    '-bufsize', '24M',            # Buffer
-                    '-profile:v', 'high',
-                    '-pix_fmt', 'yuv420p',
-                    '-movflags', '+faststart',
-                ])
-                
-                if temp_audio.exists():
-                    ffmpeg_cmd.extend(['-c:a', 'copy'])  # Copia áudio (já é AAC)
-                else:
-                    ffmpeg_cmd.extend(['-an'])  # Sem áudio
-                
-                ffmpeg_cmd.append(str(output_path))
-                
-                logger.info(f"[NVENC] Comando: {' '.join(ffmpeg_cmd[:10])}...")
-                
-                # Executa FFmpeg com NVENC
-                process = subprocess.run(
-                    ffmpeg_cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=300  # 5 minutos máximo por corte
+                    verbose=False,
+                    temp_audiofile=str(temp_audio),
+                    remove_temp=True
                 )
                 
-                if process.returncode != 0:
-                    logger.warning(f"[NVENC] Erro: {process.stderr[-500:]}")
-                    raise Exception("NVENC falhou")
-                
-                encode_time = time.time() - start_encode
-                logger.info(f"[NVENC] ✓ Encoding GPU concluído em {encode_time:.1f}s")
-                
-            else:
-                # Fallback: libx264 (CPU) - mas com aviso
-                logger.warning("=" * 60)
-                logger.warning("[WARNING] NVENC NÃO DISPONÍVEL - USANDO CPU!")
-                logger.warning("Isso é MUITO mais lento. Verifique drivers NVIDIA.")
-                logger.warning("=" * 60)
-                
-                ffmpeg_cmd = [
-                    'ffmpeg', '-y',
-                    '-i', str(temp_raw),
-                ]
-                
-                if temp_audio.exists():
-                    ffmpeg_cmd.extend(['-i', str(temp_audio)])
-                
-                ffmpeg_cmd.extend([
-                    '-c:v', 'libx264',
-                    '-preset', 'fast',
-                    '-crf', '23',
-                    '-profile:v', 'high',
-                    '-pix_fmt', 'yuv420p',
-                    '-movflags', '+faststart',
-                ])
-                
-                if temp_audio.exists():
-                    ffmpeg_cmd.extend(['-c:a', 'copy'])
+                # Verifica se arquivo foi criado
+                if output_path.exists() and output_path.stat().st_size > 100000:
+                    encoding_success = True
+                    encode_time = time.time() - start_encode
+                    file_size = output_path.stat().st_size / 1e6
+                    
+                    logger.info("=" * 60)
+                    logger.info(f"[SUCCESS] Corte {num} finalizado!")
+                    logger.info(f"  Arquivo: {file_size:.1f} MB")
+                    logger.info(f"  Tempo: {encode_time:.1f}s")
+                    logger.info(f"  Codec: {codec}")
+                    logger.info(f"  Velocidade: {(end-start)/encode_time:.1f}x realtime")
+                    logger.info("=" * 60)
+                    break
                 else:
-                    ffmpeg_cmd.extend(['-an'])
+                    raise Exception("Arquivo de saída inválido ou muito pequeno")
+                    
+            except Exception as e:
+                logger.warning(f"[WARNING] Encoding {codec} falhou: {str(e)[:100]}")
                 
-                ffmpeg_cmd.append(str(output_path))
+                # Limpa arquivo parcial
+                if output_path.exists():
+                    try: output_path.unlink()
+                    except: pass
                 
-                process = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=600)
-                
-                if process.returncode != 0:
-                    raise Exception(f"libx264 falhou: {process.stderr[-200:]}")
-                
-                encode_time = time.time() - start_encode
-                logger.info(f"[CPU] Encoding concluído em {encode_time:.1f}s")
-            
-            # Valida saída
-            if output_path.exists() and output_path.stat().st_size > 100000:
-                file_size = output_path.stat().st_size / 1e6
-                total_time = export_time + encode_time
-                logger.info("=" * 60)
-                logger.info(f"[SUCCESS] Corte {num} finalizado!")
-                logger.info(f"  Arquivo: {file_size:.1f} MB")
-                logger.info(f"  Tempo total: {total_time:.1f}s")
-                logger.info(f"  Codec: {'NVENC (GPU)' if nvenc_available else 'libx264 (CPU)'}")
-                logger.info("=" * 60)
-            else:
-                raise Exception("Arquivo de saída inválido")
-                
-        finally:
-            # Limpa arquivos temporários
-            for temp_file in [temp_raw, temp_audio]:
-                try:
-                    if temp_file.exists():
-                        temp_file.unlink()
-                except:
-                    pass
+                # Tenta próximo codec
+                continue
+        
+        if not encoding_success:
+            raise Exception("Encoding falhou com todos os codecs")
 
         return str(output_path)
         
@@ -3254,14 +3143,15 @@ if __name__ == "__main__":
         # Banner com versão detalhada
         print("\n" + "="*70)
         print("╔═══════════════════════════════════════════════════════════════════╗")
-        print("║   ANIMECUT SERVERLESS v15.1 - BUILD 2025-12-17 23:00             ║")
-        print("║   TÍTULOS MAGNÉTICOS + DIAGNÓSTICO COMPLETO + NVENC              ║")
+        print("║   ANIMECUT SERVERLESS v15.2 - BUILD 2025-12-18 03:00             ║")
+        print("║   TÍTULOS DA TRANSCRIÇÃO + ENCODING DIRETO + SEM RAW             ║")
         print("╚═══════════════════════════════════════════════════════════════════╝")
-        print("Novidades v15.1:")
-        print("  ✓ TÍTULOS MAGNÉTICOS: Chamativos e contextuais")
-        print("  ✓ DIAGNÓSTICO COMPLETO: Log detalhado do titleStyle e background")
-        print("  ✓ NVENC FORÇADO: Encoding na GPU")
-        print("  ✓ LOG DE INPUT: Mostra TUDO que chega do webapp")
+        print("Novidades v15.2:")
+        print("  ✓ TÍTULOS DA TRANSCRIÇÃO: Usa texto REAL do diálogo")
+        print("  ✓ ENCODING DIRETO: Sem arquivo RAW intermediário (economiza disco)")
+        print("  ✓ NVENC COM FALLBACK: GPU primeiro, CPU se necessário")
+        print("  ✓ LIMPEZA DE DISCO: Remove arquivos temp automaticamente")
+        print("  ✓ CORREÇÃO DE ESPAÇO: Detecta e avisa sobre disco cheio")
         print(f"Volume: {VOLUME_BASE}")
         print(f"Cache: {CACHE_DIR}")
         print(f"B2 Bucket: {B2_BUCKET if B2_BUCKET else 'NÃO CONFIGURADO'}")
