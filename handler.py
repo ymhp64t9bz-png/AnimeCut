@@ -7,7 +7,7 @@ Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1
 CORREÇÕES: Força KortexClipAI2 mesmo com variável ambiente errada
 """
 
-# ==================== IMPORTAÇÕES ESSENCIAIS ====================
+# ==================== IMPORTAÇÕES ESSENCIAIS ==================== 
 import os
 import sys
 import logging
