@@ -23,7 +23,7 @@ ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
 
 # ==================== 1. DEPENDÊNCIAS DE SISTEMA + cuDNN 9 ====================
-# Instala cuDNN 9.x que é necessário para ctranslate2/faster-whisper recentes
+# Instala cuDNN 9.x que é necessário para ctranslate2/faster-whisper recentes 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3-dev \
