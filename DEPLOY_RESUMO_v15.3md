@@ -4,7 +4,7 @@
 
 Você ainda está rodando **v15.0** que usa a estratégia RAW intermediária:
 
-```
+``` 
 v15.0 (ATUAL - LENTO):
 ├── STEP 1: Export RAW → 280-308 segundos (!)
 ├── STEP 2: Export Áudio → ERRO (fps)
