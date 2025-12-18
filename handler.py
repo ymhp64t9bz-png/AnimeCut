@@ -7,7 +7,7 @@ Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1
 CORREÇÕES: Força KortexClipAI2 mesmo com variável ambiente errada
 """
 
-# ==================== IMPORTAÇÕES ESSENCIAIS ===================
+# ==================== IMPORTAÇÕES ESSENCIAIS ====================
 import os
 import sys
 import logging
@@ -2148,6 +2148,7 @@ def analyze_video_content_gpu(
         
         cuts = []
         used_ranges = []  # Para evitar duplicação
+        used_titles = set()  # v15.6: Evita títulos repetidos
         
         def ranges_overlap(start1, end1, start2, end2, min_gap=10):
             """Verifica se dois ranges se sobrepõem"""
@@ -2160,96 +2161,99 @@ def analyze_video_content_gpu(
                     return True
             return False
         
-        def extract_title_from_text(text, moment_type, index):
+        def generate_unique_title_v156(text, moment_type, index, anime_name, start_time, all_segs):
             """
-            v15.2: SEMPRE gera título baseado no TEXTO REAL da transcrição
-            NUNCA usa títulos genéricos quando há texto disponível
+            v15.6: GERAÇÃO DE TÍTULOS ÚNICOS E CRIATIVOS
+            
+            REGRAS:
+            1. NUNCA repete títulos
+            2. USA texto da transcrição SEMPRE que possível
+            3. Combina com nome do anime para contexto
+            4. Cria títulos magnéticos para TikTok/Reels
             """
             
-            # Se tem texto da transcrição, USA ELE
+            # Se já temos texto da transcrição, usa
             if text and not text.startswith("[") and len(text.strip()) > 5:
-                # Limpa o texto
-                text = text.strip()
+                clean_text = text.strip().replace("[", "").replace("]", "")
+                words = clean_text.split()
                 
-                # Remove tags e caracteres especiais
-                text = text.replace("[", "").replace("]", "")
-                
-                # Palavras de impacto que fazem títulos melhores
-                power_words = ["eu", "você", "nós", "ele", "ela", "vou", "vai", "pode", 
-                               "nunca", "sempre", "preciso", "quero", "meu", "seu",
-                               "poder", "força", "morte", "vida", "luta", "proteger"]
-                
-                words = text.split()
-                
-                # Tenta encontrar uma frase completa de impacto
                 if len(words) >= 3:
-                    # Se tem menos de 8 palavras, usa tudo
+                    # Pega as primeiras 6-8 palavras mais impactantes
                     if len(words) <= 8:
-                        title = text.upper()
+                        base_title = clean_text.upper()
                     else:
-                        # Encontra a melhor parte da frase
-                        # Prioriza frases que começam com palavras de impacto
+                        # Encontra início com palavra de impacto
+                        power_starts = ["eu", "você", "ele", "ela", "nós", "vou", "vai", 
+                                       "nunca", "sempre", "preciso", "quero", "isso"]
                         best_start = 0
-                        for i, word in enumerate(words[:5]):
-                            if word.lower() in power_words:
+                        for i, w in enumerate(words[:5]):
+                            if w.lower() in power_starts:
                                 best_start = i
                                 break
                         
-                        # Pega 6-8 palavras a partir do melhor início
                         end_idx = min(best_start + 7, len(words))
-                        title_words = words[best_start:end_idx]
-                        title = " ".join(title_words).upper()
+                        base_title = " ".join(words[best_start:end_idx]).upper()
                     
-                    # Remove pontuação do final
-                    title = title.rstrip(".,;:!?\"'")
+                    # Remove pontuação e adiciona !
+                    base_title = base_title.rstrip(".,;:!?\"'") + "!"
                     
-                    # Se ficou muito curto, adiciona contexto
-                    if len(title) < 10:
-                        title = "E ENTÃO: " + title
+                    # Garante que é único
+                    final_title = base_title
+                    counter = 1
+                    while final_title in used_titles:
+                        # Adiciona variação
+                        variations = ["...", " 😱", " 🔥", " 💥", " ⚡"]
+                        final_title = base_title.rstrip("!") + variations[counter % len(variations)] + "!"
+                        counter += 1
+                        if counter > 10:
+                            final_title = f"{base_title[:-1]} #{index+1}!"
+                            break
                     
-                    title += "!"
-                    
-                    logger.info(f"[TITULO v15.2] Gerado do TEXTO: '{title}' (original: '{text[:40]}...')")
-                    return title
+                    used_titles.add(final_title)
+                    logger.info(f"[TITULO v15.6] ✓ Gerado da TRANSCRIÇÃO: '{final_title}'")
+                    return final_title
             
-            # FALLBACK: Só usa genérico se REALMENTE não tem texto
-            # Mas agora com títulos mais chamativos
-            fallback_by_type = {
-                "action": [
-                    "ESSA CENA VAI TE SURPREENDER!",
-                    "OLHA O QUE ACONTECE AQUI!",
-                    "VOCÊ PRECISA VER ISSO!",
-                    "A CENA MAIS INTENSA!",
-                    "PREPARE-SE PARA ISSO!",
-                ],
-                "dialogue": [
-                    "ESCUTA O QUE ELE DIZ!",
-                    "ESSA FALA É ÉPICA!",
-                    "PALAVRAS PODEROSAS!",
-                    "O DISCURSO MAIS FORTE!",
-                    "ISSO MUDA TUDO!",
-                ],
-                "humor": [
-                    "ESSA É MUITO BOA!",
-                    "VAI RIR MUITO DISSO!",
-                    "COMÉDIA PURA!",
-                    "MOMENTO HILÁRIO!",
-                    "ISSO É GENIAL!",
-                ],
-                "default": [
-                    "VOCÊ NÃO ESTÁ PREPARADO!",
-                    "OLHA ESSA CENA!",
-                    "ISSO É INCRÍVEL!",
-                    "ASSISTA ATÉ O FINAL!",
-                    "A MELHOR PARTE!",
-                ]
-            }
+            # Se não tem texto direto, busca no intervalo do corte
+            if all_segs:
+                # Busca QUALQUER texto no intervalo expandido
+                for seg in all_segs:
+                    seg_start = seg.get("start", 0)
+                    seg_end = seg.get("end", 0)
+                    
+                    # Verifica se o segmento está perto do momento
+                    if seg_start >= start_time - 30 and seg_end <= start_time + 120:
+                        seg_text = seg.get("text", "").strip()
+                        if seg_text and len(seg_text) > 10 and not seg_text.startswith("["):
+                            # Encontrou texto! Usa recursivamente
+                            return generate_unique_title_v156(seg_text, moment_type, index, anime_name, start_time, None)
             
-            titles = fallback_by_type.get(moment_type, fallback_by_type["default"])
-            title = titles[index % len(titles)]
+            # FALLBACK CRIATIVO v15.6: Títulos únicos baseados em contexto
+            logger.warning(f"[TITULO v15.6] ⚠ Usando título criativo (sem transcrição)")
             
-            logger.warning(f"[TITULO v15.2] ⚠ Usando fallback (sem texto): '{title}'")
-            return title
+            # Templates criativos que incluem variação
+            creative_templates = [
+                f"OLHA ESSA CENA DE {anime_name.upper()}!",
+                f"MOMENTO ÉPICO #{index+1}!",
+                f"{anime_name.upper()}: CENA IMPERDÍVEL!",
+                f"VOCÊ PRECISA VER ISSO! #{index+1}",
+                f"A MELHOR PARTE DO EP #{index+1}!",
+                f"CENA {index+1} VAI TE SURPREENDER!",
+                f"NÃO PERCA ESSA CENA #{index+1}!",
+                f"{anime_name.upper()} - MOMENTO {index+1}!",
+                f"ASSISTA ATÉ O FINAL #{index+1}!",
+                f"ISSO É INCRÍVEL! CENA {index+1}",
+            ]
+            
+            # Escolhe baseado no index mas evita repetição
+            for template in creative_templates:
+                if template not in used_titles:
+                    used_titles.add(template)
+                    return template
+            
+            # Último recurso: título com timestamp
+            unique_title = f"CENA AOS {int(start_time//60)}:{int(start_time%60):02d}!"
+            used_titles.add(unique_title)
+            return unique_title
         
         # Processa cada momento importante
         for idx, moment in enumerate(filtered_moments):
@@ -2284,8 +2288,15 @@ def analyze_video_content_gpu(
             if is_range_used(start, end):
                 continue
             
-            # Gera título único
-            title = extract_title_from_text(moment.get("text", ""), moment["type"], len(cuts))
+            # v15.6: Gera título ÚNICO usando nova função
+            title = generate_unique_title_v156(
+                moment.get("text", ""), 
+                moment["type"], 
+                len(cuts),
+                anime_name,
+                start,
+                all_segments
+            )
             
             # Adiciona corte
             cuts.append({
@@ -2325,7 +2336,15 @@ def analyze_video_content_gpu(
                             segment_text = seg["text"]
                             break
                     
-                    title = extract_title_from_text(segment_text, "fallback", len(cuts))
+                    # v15.6: Usa nova função de título único
+                    title = generate_unique_title_v156(
+                        segment_text, 
+                        "segment", 
+                        len(cuts),
+                        anime_name,
+                        seg_start,
+                        all_segments
+                    )
                     
                     cuts.append({
                         "start": round(seg_start, 2),
@@ -2698,14 +2717,12 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
         output_filename = f"cut_{num}_{safe_title}_{uuid.uuid4().hex[:6]}.mp4"
         output_path = OUTPUT_DIR / output_filename
         
-        # ==================== ENCODING v15.5 - ULTRARRÁPIDO COM FFMPEG PIPE ====================
-        # ESTRATÉGIA: Usa FFmpeg via pipe para encoding extremamente rápido
-        # - MoviePy apenas para composição em memória
-        # - FFmpeg recebe frames via pipe e codifica com NVENC/x264
-        # - Tempo esperado: ~30-60s por corte de 100s
+        # ==================== ENCODING v15.6 - NVENC FORÇADO ====================
+        # ESTRATÉGIA: NVENC primeiro com fallback para CPU apenas se GPU falhar
+        # RTX 4090 = 24GB VRAM, deve usar GPU sempre
         
         logger.info("=" * 60)
-        logger.info("[ENCODING v15.5] ULTRARRÁPIDO - FFMPEG PIPE")
+        logger.info("[ENCODING v15.6] NVENC FORÇADO - RTX 4090")
         logger.info("=" * 60)
         
         start_encode = time.time()
@@ -2724,110 +2741,68 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
         
         # Verifica NVENC disponível
         nvenc_available = False
+        nvenc_encoders = []
         try:
             result = subprocess.run(['ffmpeg', '-hide_banner', '-encoders'], 
                                    capture_output=True, text=True, timeout=10)
-            nvenc_available = 'h264_nvenc' in result.stdout
-            logger.info(f"[NVENC] Disponível: {'✓ SIM' if nvenc_available else '✗ NÃO'}")
+            if 'h264_nvenc' in result.stdout:
+                nvenc_available = True
+                nvenc_encoders.append('h264_nvenc')
+            if 'hevc_nvenc' in result.stdout:
+                nvenc_encoders.append('hevc_nvenc')
+            logger.info(f"[GPU] NVENC: {'✓ DISPONÍVEL' if nvenc_available else '✗ NÃO DISPONÍVEL'}")
+            if nvenc_encoders:
+                logger.info(f"[GPU] Encoders: {nvenc_encoders}")
+        except Exception as e:
+            logger.warning(f"[GPU] Erro ao verificar NVENC: {e}")
+        
+        # Verifica GPU
+        try:
+            gpu_result = subprocess.run(['nvidia-smi', '--query-gpu=name,memory.free', '--format=csv,noheader'],
+                                       capture_output=True, text=True, timeout=10)
+            if gpu_result.returncode == 0:
+                logger.info(f"[GPU] Status: {gpu_result.stdout.strip()}")
         except:
             pass
         
-        # ==================== MÉTODO 1: FFMPEG DIRETO VIA PIPE ====================
-        try:
-            logger.info("[ENCODING] Método 1: FFmpeg via pipe...")
-            
-            # Parâmetros do vídeo
-            fps = final.fps if hasattr(final, 'fps') and final.fps else 24
-            width, height = target_w, target_h
-            
-            # Escolhe encoder
-            if nvenc_available:
-                video_codec = ['-c:v', 'h264_nvenc', '-preset', 'p4', '-b:v', '6M']
-                logger.info("[ENCODING] Usando NVENC (p4)")
-            else:
-                video_codec = ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26']
-                logger.info("[ENCODING] Usando libx264 (ultrafast)")
-            
-            # Comando FFmpeg para receber frames via pipe
-            ffmpeg_cmd = [
-                'ffmpeg', '-y',
-                '-f', 'rawvideo',
-                '-vcodec', 'rawvideo',
-                '-s', f'{width}x{height}',
-                '-pix_fmt', 'rgb24',
-                '-r', str(fps),
-                '-i', '-',  # Input via pipe
-                '-an',  # Sem áudio por enquanto
-                *video_codec,
-                '-pix_fmt', 'yuv420p',
-                '-movflags', '+faststart',
-                str(output_path).replace('.mp4', '_temp.mp4')
-            ]
-            
-            # Inicia FFmpeg como subprocess
-            ffmpeg_proc = subprocess.Popen(
-                ffmpeg_cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-            
-            # Envia frames para FFmpeg
-            frame_count = 0
-            for frame in final.iter_frames(fps=fps, dtype='uint8'):
-                try:
-                    ffmpeg_proc.stdin.write(frame.tobytes())
-                    frame_count += 1
-                    if frame_count % 100 == 0:
-                        logger.debug(f"[ENCODING] Frames processados: {frame_count}")
-                except BrokenPipeError:
-                    break
-            
-            # Fecha stdin e aguarda
-            ffmpeg_proc.stdin.close()
-            ffmpeg_proc.wait(timeout=300)
-            
-            temp_video = Path(str(output_path).replace('.mp4', '_temp.mp4'))
-            
-            if temp_video.exists() and temp_video.stat().st_size > 50000:
-                # Adiciona áudio
-                logger.info("[ENCODING] Adicionando áudio...")
+        temp_audio = TEMP_DIR / f"audio_{num}_{uuid.uuid4().hex[:6]}.m4a"
+        
+        # ==================== MÉTODO 1: NVENC DIRETO (PRIORITÁRIO) ====================
+        if nvenc_available:
+            try:
+                logger.info("[ENCODING] Método 1: NVENC h264_nvenc (GPU)")
                 
-                # Extrai áudio do clip original
-                temp_audio = TEMP_DIR / f"audio_{num}_{uuid.uuid4().hex[:6]}.m4a"
+                # Limpa arquivo anterior
+                if output_path.exists():
+                    try: output_path.unlink()
+                    except: pass
                 
-                if final.audio:
-                    final.audio.write_audiofile(
-                        str(temp_audio),
-                        fps=44100,
-                        nbytes=2,
-                        codec='aac',
-                        bitrate='128k',
-                        verbose=False,
-                        logger=None
-                    )
-                    
-                    # Combina vídeo + áudio
-                    merge_cmd = [
-                        'ffmpeg', '-y',
-                        '-i', str(temp_video),
-                        '-i', str(temp_audio),
-                        '-c:v', 'copy',
-                        '-c:a', 'aac',
-                        '-shortest',
+                # NVENC com configurações otimizadas para RTX 4090
+                # Preset p1 = mais rápido, p7 = melhor qualidade
+                final.write_videofile(
+                    str(output_path),
+                    codec='h264_nvenc',
+                    audio_codec='aac',
+                    audio_bitrate='128k',
+                    threads=12,
+                    fps=24,
+                    ffmpeg_params=[
+                        '-preset', 'p4',           # Balanceado (p1-p7)
+                        '-tune', 'hq',             # Alta qualidade
+                        '-rc', 'vbr',              # Variable bitrate
+                        '-cq', '23',               # Qualidade constante
+                        '-b:v', '6M',              # Bitrate alvo
+                        '-maxrate', '10M',         # Max bitrate
+                        '-bufsize', '20M',         # Buffer
+                        '-pix_fmt', 'yuv420p',
                         '-movflags', '+faststart',
-                        str(output_path)
-                    ]
-                    subprocess.run(merge_cmd, capture_output=True, timeout=120)
-                    
-                    # Limpa temporários
-                    try: temp_video.unlink()
-                    except: pass
-                    try: temp_audio.unlink()
-                    except: pass
-                else:
-                    # Sem áudio, só renomeia
-                    temp_video.rename(output_path)
+                        '-gpu', '0'                # Força GPU 0
+                    ],
+                    logger=None,
+                    verbose=False,
+                    temp_audiofile=str(temp_audio),
+                    remove_temp=True
+                )
                 
                 if output_path.exists() and output_path.stat().st_size > 50000:
                     encoding_success = True
@@ -2836,80 +2811,106 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
                     speed = cut_duration / encode_time if encode_time > 0 else 0
                     
                     logger.info("=" * 60)
-                    logger.info(f"[✓ SUCCESS] Corte {num} finalizado!")
+                    logger.info(f"[✓ SUCCESS] Corte {num} - NVENC GPU!")
                     logger.info(f"    Arquivo: {file_size:.1f} MB")
                     logger.info(f"    Tempo: {encode_time:.1f}s")
                     logger.info(f"    Velocidade: {speed:.2f}x realtime")
-                    logger.info(f"    Método: FFmpeg Pipe + {'NVENC' if nvenc_available else 'x264'}")
+                    logger.info(f"    Codec: h264_nvenc (RTX 4090)")
                     logger.info("=" * 60)
                     
-        except Exception as pipe_error:
-            logger.warning(f"[WARNING] FFmpeg pipe falhou: {str(pipe_error)[:100]}")
-            # Limpa arquivos temporários
-            try:
-                temp_video = Path(str(output_path).replace('.mp4', '_temp.mp4'))
-                if temp_video.exists():
-                    temp_video.unlink()
-            except:
-                pass
+            except Exception as nvenc_error:
+                logger.warning(f"[NVENC] Erro: {str(nvenc_error)[:150]}")
+                # Limpa arquivo parcial
+                if output_path.exists():
+                    try: output_path.unlink()
+                    except: pass
         
-        # ==================== MÉTODO 2: MOVIEPY TRADICIONAL (FALLBACK) ====================
+        # ==================== MÉTODO 2: NVENC COM PRESET MAIS CONSERVADOR ====================
+        if not encoding_success and nvenc_available:
+            try:
+                logger.info("[ENCODING] Método 2: NVENC preset conservador")
+                
+                final.write_videofile(
+                    str(output_path),
+                    codec='h264_nvenc',
+                    audio_codec='aac',
+                    audio_bitrate='128k',
+                    threads=8,
+                    fps=24,
+                    ffmpeg_params=[
+                        '-preset', 'p2',           # Mais rápido
+                        '-b:v', '5M',
+                        '-pix_fmt', 'yuv420p',
+                        '-movflags', '+faststart'
+                    ],
+                    logger=None,
+                    verbose=False,
+                    temp_audiofile=str(temp_audio),
+                    remove_temp=True
+                )
+                
+                if output_path.exists() and output_path.stat().st_size > 50000:
+                    encoding_success = True
+                    encode_time = time.time() - start_encode
+                    file_size = output_path.stat().st_size / 1e6
+                    speed = cut_duration / encode_time if encode_time > 0 else 0
+                    
+                    logger.info("=" * 60)
+                    logger.info(f"[✓ SUCCESS] Corte {num} - NVENC conservador!")
+                    logger.info(f"    Arquivo: {file_size:.1f} MB")
+                    logger.info(f"    Tempo: {encode_time:.1f}s")
+                    logger.info(f"    Velocidade: {speed:.2f}x realtime")
+                    logger.info("=" * 60)
+                    
+            except Exception as e:
+                logger.warning(f"[NVENC] Preset conservador falhou: {str(e)[:100]}")
+                if output_path.exists():
+                    try: output_path.unlink()
+                    except: pass
+        
+        # ==================== MÉTODO 3: CPU ULTRAFAST (ÚLTIMO RECURSO) ====================
         if not encoding_success:
-            logger.info("[ENCODING] Método 2: MoviePy tradicional (fallback)...")
+            logger.warning("[ENCODING] Método 3: CPU libx264 (fallback)")
             
-            temp_audio = TEMP_DIR / f"audio_{num}_{uuid.uuid4().hex[:6]}.m4a"
-            
-            codecs_to_try = [
-                ('libx264', 'ultrafast', ['-pix_fmt', 'yuv420p', '-crf', '28', '-movflags', '+faststart']),
-            ]
-            
-            if nvenc_available:
-                codecs_to_try.insert(0, ('h264_nvenc', 'p4', ['-pix_fmt', 'yuv420p', '-b:v', '5M', '-movflags', '+faststart']))
-            
-            for codec, preset, ffmpeg_params in codecs_to_try:
-                try:
-                    logger.info(f"[ENCODING] Tentando {codec} (preset={preset})...")
+            try:
+                final.write_videofile(
+                    str(output_path),
+                    codec='libx264',
+                    preset='ultrafast',
+                    audio_codec='aac',
+                    audio_bitrate='128k',
+                    threads=12,
+                    fps=24,
+                    ffmpeg_params=[
+                        '-crf', '26',
+                        '-pix_fmt', 'yuv420p',
+                        '-movflags', '+faststart'
+                    ],
+                    logger=None,
+                    verbose=False,
+                    temp_audiofile=str(temp_audio),
+                    remove_temp=True
+                )
+                
+                if output_path.exists() and output_path.stat().st_size > 50000:
+                    encoding_success = True
+                    encode_time = time.time() - start_encode
+                    file_size = output_path.stat().st_size / 1e6
+                    speed = cut_duration / encode_time if encode_time > 0 else 0
                     
-                    if output_path.exists():
-                        try: output_path.unlink()
-                        except: pass
+                    logger.info("=" * 60)
+                    logger.info(f"[✓ SUCCESS] Corte {num} - CPU fallback")
+                    logger.info(f"    Arquivo: {file_size:.1f} MB")
+                    logger.info(f"    Tempo: {encode_time:.1f}s")
+                    logger.info(f"    Velocidade: {speed:.2f}x realtime")
+                    logger.info(f"    ⚠ ATENÇÃO: Usando CPU, verifique NVENC")
+                    logger.info("=" * 60)
                     
-                    final.write_videofile(
-                        str(output_path),
-                        codec=codec,
-                        preset=preset,
-                        audio_codec='aac',
-                        audio_bitrate='128k',
-                        threads=8,
-                        fps=24,
-                        ffmpeg_params=ffmpeg_params,
-                        logger=None,
-                        verbose=False,
-                        temp_audiofile=str(temp_audio),
-                        remove_temp=True
-                    )
-                    
-                    if output_path.exists() and output_path.stat().st_size > 50000:
-                        encoding_success = True
-                        encode_time = time.time() - start_encode
-                        file_size = output_path.stat().st_size / 1e6
-                        speed = cut_duration / encode_time if encode_time > 0 else 0
-                        
-                        logger.info("=" * 60)
-                        logger.info(f"[✓ SUCCESS] Corte {num} finalizado!")
-                        logger.info(f"    Arquivo: {file_size:.1f} MB")
-                        logger.info(f"    Tempo: {encode_time:.1f}s")
-                        logger.info(f"    Velocidade: {speed:.2f}x realtime")
-                        logger.info(f"    Codec: {codec} ({preset})")
-                        logger.info("=" * 60)
-                        break
-                        
-                except Exception as e:
-                    logger.warning(f"[WARNING] {codec} falhou: {str(e)[:100]}")
-                    if output_path.exists():
-                        try: output_path.unlink()
-                        except: pass
-                    continue
+            except Exception as e:
+                logger.error(f"[CPU] Também falhou: {str(e)[:100]}")
+                if output_path.exists():
+                    try: output_path.unlink()
+                    except: pass
         
         if not encoding_success:
             raise Exception("Encoding falhou com todos os codecs")
@@ -3442,12 +3443,13 @@ if __name__ == "__main__":
         # Banner com versão detalhada
         print("\n" + "="*70)
         print("╔═══════════════════════════════════════════════════════════════════╗")
-        print("║   ANIMECUT SERVERLESS v15.5c - BUILD 2025-12-18 09:30            ║")
-        print("║   🚀 ULTRARRÁPIDO + TÍTULOS DA TRANSCRIÇÃO + FONTES              ║")
+        print("║   ANIMECUT SERVERLESS v15.6 - BUILD 2025-12-18 10:00            ║")
+        print("║   🚀 NVENC FORÇADO + TÍTULOS ÚNICOS + FONTES                    ║")
         print("╚═══════════════════════════════════════════════════════════════════╝")
-        print("Novidades v15.5c:")
-        print("  ✓ ENCODING: FFmpeg pipe NVENC (~60s por corte de 100s)")
-        print("  ✓ TÍTULOS: Extrai texto REAL da transcrição para todos cortes")
+        print("Novidades v15.6:")
+        print("  ✓ ENCODING: NVENC forçado como prioridade (RTX 4090)")
+        print("  ✓ TÍTULOS: 100% únicos - NUNCA repete títulos")
+        print("  ✓ TÍTULOS: Usa transcrição REAL sempre que possível")
         print("  ✓ FONTES: 16 fontes customizadas (pasta 'fontes/')")
         print("  ✓ BACKGROUND: Download via S3 API (resolve 401)")
         print(f"Volume: {VOLUME_BASE}")
