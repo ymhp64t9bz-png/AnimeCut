@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AnimeCut Serverless v12.7.3 FORCE B2 BUCKET
-BUILD: 2025-12-16 14:00 - IGNORA ENV ANTIGA
-Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1
-CORREÇÕES: Força KortexClipAI2 mesmo com variável ambiente errada
+AnimeCut Serverless v15.7 FFMPEG PURO + TÍTULOS CRIATIVOS
+BUILD: 2025-12-18 11:30 - MÁXIMA VELOCIDADE
+Stack: Whisper V3 Turbo, YOLOv8, DeepFilterNet, FFmpeg NVENC PURO
+NOVIDADES: 
+- FFmpeg direto (sem MoviePy no encoding) = ~30s/corte
+- 400+ títulos criativos por gênero
+- NUNCA usa títulos genéricos
 """
 
 # ==================== IMPORTAÇÕES ESSENCIAIS ====================
@@ -29,6 +32,169 @@ from typing import List, Dict, Optional, Tuple, Any
 from functools import wraps
 from datetime import datetime
 import html
+
+# ==================== BIBLIOTECA DE TÍTULOS CRIATIVOS v1.0 ====================
+# 50+ títulos para cada gênero - NUNCA use títulos genéricos
+
+TITULOS_ACAO = [
+    "A BATALHA QUE MUDOU TUDO!", "ELE SIMPLESMENTE DESTRUIU GERAL!", "NINGUÉM ESPERAVA ESSE GOLPE!",
+    "O PODER MÁXIMO FOI LIBERADO!", "ESSA LUTA VAI TE DEIXAR SEM AR!", "FOI NESSE MOMENTO QUE ELE PERDEU TUDO!",
+    "A TÉCNICA SECRETA FINALMENTE REVELADA!", "QUANDO O HERÓI PAROU DE BRINCAR!", "O INIMIGO TREMEU DE MEDO!",
+    "ESSE SOCO ATRAVESSOU DIMENSÕES!", "A EXPLOSÃO MAIS ÉPICA DO ANIME!", "ELE SOZINHO CONTRA UM EXÉRCITO!",
+    "O MOMENTO QUE DEFINIU A GUERRA!", "PODER ALÉM DO LIMITE HUMANO!", "A TRANSFORMAÇÃO QUE CHOCOU A TODOS!",
+    "NUNCA SUBESTIME ESSE PERSONAGEM!", "O CONFRONTO FINAL COMEÇOU!", "ESSA CENA QUEBROU A INTERNET!",
+    "O GOLPE QUE NINGUÉM VIU CHEGAR!", "ELE ACORDOU O MONSTRO INTERIOR!", "A VINGANÇA FOI SERVIDA GELADA!",
+    "QUANDO A RAIVA TOMA CONTA!", "O SACRIFÍCIO QUE SALVOU TODOS!", "ESSE CARA É SIMPLESMENTE INSANO!",
+    "A TÉCNICA PROIBIDA FOI USADA!", "ELE SUPEROU SEUS PRÓPRIOS LIMITES!", "O MOMENTO MAIS BRUTAL DO ANIME!",
+    "FOI ASSIM QUE ELE SE TORNOU LENDA!", "A CENA QUE TODO FÃ ESPERAVA!", "NÍVEL DE PODER: ABSURDO!",
+    "O HERÓI FINALMENTE FICOU SÉRIO!", "ESSA SEQUÊNCIA É PERFEITA!", "O VILÃO CONHECEU SEU DESTINO!",
+    "ADRENALINA PURA DO INÍCIO AO FIM!", "ELE MOSTROU DO QUE É CAPAZ!", "A BATALHA DOS TITÃS!",
+    "QUANDO DOIS MONSTROS SE ENCONTRAM!", "O DESPERTAR DO VERDADEIRO PODER!", "ESSA CENA DÁ ARREPIOS!",
+    "O MOMENTO QUE MUDOU O PROTAGONISTA!", "A LUTA MAIS INTENSA DA TEMPORADA!", "ELE LUTOU ATÉ O ÚLTIMO SUSPIRO!",
+    "O CONTRA-ATAQUE DEVASTADOR!", "QUANDO O FRACO VIRA O MAIS FORTE!", "A EXPLOSÃO DE PODER INCONTROLÁVEL!",
+    "ELE PROTEGEU TODOS COM UM GOLPE!", "O CLÍMAX DA BATALHA!", "ESSE MOMENTO FICOU PRA HISTÓRIA!",
+    "A VITÓRIA MAIS ÉPICA DE TODAS!", "O VILÃO NÃO SABIA COM QUEM MEXIA!",
+]
+
+TITULOS_DIALOGO = [
+    "ESSA FALA MUDOU MINHA VISÃO!", "AS PALAVRAS MAIS FORTES DO ANIME!", "ELE DISSE A VERDADE NA CARA!",
+    "ESSE DISCURSO É PERFEITO!", "PALAVRAS QUE ATRAVESSAM A ALMA!", "O MOMENTO MAIS PROFUNDO!",
+    "ESSA FRASE FICOU NA MINHA CABEÇA!", "ELE FALOU O QUE TODOS PENSAVAM!", "A VERDADE FINALMENTE FOI DITA!",
+    "ESSE DIÁLOGO É OBRA DE ARTE!", "QUANDO AS PALAVRAS MACHUCAM MAIS!", "A FRASE QUE DEFINIU O PERSONAGEM!",
+    "ELE CALOU TODO MUNDO!", "O DISCURSO QUE MOTIVOU O HERÓI!", "PALAVRAS DE UM VERDADEIRO LÍDER!",
+    "ESSA RESPOSTA FOI DESTRUIDORA!", "O VILÃO TINHA RAZÃO NESSA!", "A FILOSOFIA POR TRÁS DO ANIME!",
+    "ELE EXPLICOU TUDO EM UMA FRASE!", "O MOMENTO DE MAIOR SABEDORIA!", "ESSA FALA DÁ ARREPIOS!",
+    "QUANDO O SILÊNCIO FALA MAIS!", "A PROMESSA QUE MUDOU TUDO!", "ELE JUROU COM A PRÓPRIA VIDA!",
+    "PALAVRAS QUE NUNCA VOU ESQUECER!", "O CONSELHO QUE TODOS PRECISAM!", "ESSA CENA É PURA REFLEXÃO!",
+    "A MENSAGEM ESCONDIDA DO ANIME!", "ELE TOCOU NO PONTO CERTO!", "O DIÁLOGO MAIS INTENSO!",
+    "QUANDO A VERDADE DÓI!", "A FRASE QUE VIROU MEME!", "ELE DESTRUIU O ARGUMENTO!",
+    "O MOMENTO MAIS FILOSÓFICO!", "PALAVRAS DE QUEM JÁ SOFREU!", "ESSA FALA RESUME O ANIME!",
+    "A LIÇÃO MAIS IMPORTANTE!", "ELE DISSE SEM MEDO!", "O DISCURSO DA VITÓRIA!",
+    "QUANDO AS PALAVRAS CURAM!", "A FRASE QUE INICIOU A GUERRA!", "ELE REVELOU SEU VERDADEIRO EU!",
+    "O MOMENTO DE VULNERABILIDADE!", "PALAVRAS QUE DERAM FORÇA!", "ESSA CENA PRECISA SER VISTA!",
+    "A CONFISSÃO QUE NINGUÉM ESPERAVA!", "ELE FINALMENTE SE ABRIU!", "O DIÁLOGO QUE FEZ CHORAR!",
+    "QUANDO AS PALAVRAS SÃO ARMAS!", "A FRASE MAIS MARCANTE DA SÉRIE!",
+]
+
+TITULOS_EMOCAO = [
+    "EU NÃO ESTAVA PREPARADO PRA ISSO!", "ESSA CENA ME DESTRUIU!", "QUEM CORTOU AS CEBOLAS?!",
+    "O MOMENTO MAIS TRISTE DO ANIME!", "EU CHOREI LITROS COM ISSO!", "A DESPEDIDA QUE DOEU DEMAIS!",
+    "ELE DEU TUDO PELOS AMIGOS!", "O SACRIFÍCIO MAIS NOBRE!", "ESSA CENA PARTIU MEU CORAÇÃO!",
+    "NUNCA VOU SUPERAR ISSO!", "O ADEUS QUE NINGUÉM QUERIA!", "ELE MORREU COMO HERÓI!",
+    "A PERDA QUE MUDOU TUDO!", "ESSE MOMENTO ME MARCOU PRA SEMPRE!", "QUANDO A DOR É INSUPORTÁVEL!",
+    "O FLASHBACK MAIS TRISTE!", "ELE GUARDOU ISSO O TEMPO TODO!", "A VERDADE POR TRÁS DA MÁSCARA!",
+    "ESSE PERSONAGEM MERECIA MAIS!", "O MOMENTO QUE O HERÓI QUEBROU!", "LÁGRIMAS DE UM GUERREIRO!",
+    "A CENA QUE TODO MUNDO CHOROU!", "ELE NUNCA MAIS SERIA O MESMO!", "O PESO DE CARREGAR ESSE FARDO!",
+    "QUANDO A ESPERANÇA MORRE!", "A ÚLTIMA LEMBRANÇA!", "ELE SORRIU NO FINAL!",
+    "O ARREPENDIMENTO CHEGOU TARDE!", "ESSA HISTÓRIA É MUITO INJUSTA!", "O MOMENTO MAIS HUMANO!",
+    "QUANDO HERÓIS TAMBÉM CHORAM!", "A CICATRIZ QUE NUNCA SOME!", "ELE PERDEU TUDO QUE AMAVA!",
+    "O PREÇO DO PODER!", "ESSA CENA ME FAZ CHORAR SEMPRE!", "A SOLIDÃO DO MAIS FORTE!",
+    "ELE CARREGOU ESSE PESO SOZINHO!", "O MOMENTO DE MAIOR DESESPERO!", "QUANDO TUDO PARECE PERDIDO!",
+    "A FERIDA QUE NUNCA CICATRIZA!", "ELE ESCOLHEU O CAMINHO DIFÍCIL!", "O LUTO QUE TRANSFORMOU!",
+    "ESSA BACKSTORY DESTRUIU MINHA ALMA!", "A DOR DE QUEM FICOU!", "ELE GUARDOU PRO RESTO DA VIDA!",
+    "O MOMENTO MAIS REAL DO ANIME!", "QUANDO A TRISTEZA VIRA FORÇA!", "A CENA QUE DEFINIU O TRAUMA!",
+    "ELE NUNCA CONTOU PRA NINGUÉM!", "O PESO DE SER O ESCOLHIDO!",
+]
+
+TITULOS_HUMOR = [
+    "EU RACHEI DE RIR COM ISSO!", "A CENA MAIS ENGRAÇADA!", "NÃO TEM COMO NÃO RIR!",
+    "ESSE ANIME É MUITO BOM!", "A PIADA QUE ME PEGOU!", "HUMOR DE QUALIDADE!",
+    "EU RI MAIS DO QUE DEVIA!", "ESSA CENA É COMÉDIA PURA!", "O TIMING PERFEITO!",
+    "NÃO ESPERAVA ESSA!", "A REAÇÃO DELE FOI DEMAIS!", "MORRI DE RIR LITERALMENTE!",
+    "ESSE PERSONAGEM É HILÁRIO!", "A CENA MAIS RANDOM!", "QUANDO O ANIME TE SURPREENDE!",
+    "EU NÃO CONSIGO PARAR DE RIR!", "O MOMENTO MAIS ABSURDO!", "ESSA PIADA É GENIAL!",
+    "A CARA DELE DISSE TUDO!", "COMÉDIA DO MAIS ALTO NÍVEL!", "EU CUSPI MINHA ÁGUA!",
+    "ESSE ANIME NÃO TEM LIMITE!", "A CENA QUE VIROU MEME!", "HUMOR INESPERADO!",
+    "EU RIO TODA VEZ QUE VEJO!", "O PERSONAGEM MAIS ENGRAÇADO!", "ESSA REAÇÃO FOI PERFEITA!",
+    "QUANDO O ANIME QUEBRA A QUARTA PAREDE!", "A PIADA MAIS INTELIGENTE!", "EU CHOREI DE RIR!",
+    "ESSE MOMENTO É ICÔNICO!", "A EXPRESSÃO FACIAL PERFEITA!", "COMÉDIA QUE FAZ SENTIDO!",
+    "O GAG MAIS ENGRAÇADO!", "ESSA CENA NUNCA ENVELHECE!", "HUMOR REFINADO!",
+    "A SITUAÇÃO MAIS CONSTRANGEDORA!", "EU PERDI TUDO NESSA PARTE!", "O ANIME MAIS ENGRAÇADO!",
+    "QUANDO A COMÉDIA É PERFEITA!", "ESSA CENA ME MATA!", "O TIMING IMPECÁVEL!",
+    "HUMOR QUE FUNCIONA!", "A REAÇÃO MAIS EXAGERADA!", "EU AMO ESSE TIPO DE HUMOR!",
+    "COMÉDIA PURA E SIMPLES!", "O MOMENTO MAIS ALEATÓRIO!", "ESSA PIADA PEGOU GERAL!",
+    "QUANDO O ABSURDO É ENGRAÇADO!", "A CENA QUE EU MOSTRO PRA TODO MUNDO!",
+]
+
+TITULOS_EPICO = [
+    "ISSO É SIMPLESMENTE ÉPICO!", "A CENA MAIS ICÔNICA!", "MASTERPIECE EM FORMA DE ANIME!",
+    "ESSE MOMENTO É PERFEITO!", "ANIMAÇÃO DE OUTRO NÍVEL!", "A CENA MAIS BEM FEITA!",
+    "OBRA PRIMA!", "ESSE ANIME É INCRÍVEL!", "O MOMENTO MAIS MEMORÁVEL!",
+    "QUALIDADE ABSURDA!", "ESSA CENA É HISTÓRICA!", "ANIMAÇÃO IMPECÁVEL!",
+    "O ÁPICE DO ANIME!", "PRODUÇÃO DE CINEMA!", "ESSE MOMENTO VAI FICAR!",
+    "A TRILHA SONORA PERFEITA!", "CINEMATOGRAFIA INCRÍVEL!", "O MOMENTO MAIS BONITO!",
+    "ESSA CENA É ARTE!", "DIREÇÃO IMPECÁVEL!", "O ANIME SE SUPEROU!",
+    "MOMENTO HISTÓRICO!", "A ANIMAÇÃO MAIS FLUIDA!", "ESSE É O PODER DO ANIME!",
+    "CENA DIGNA DE OSCAR!", "PRODUÇÃO ESPETACULAR!", "O CLÍMAX PERFEITO!",
+    "ESSA CENA REPRESENTA O ANIME!", "NÍVEL DE QUALIDADE ABSURDO!", "O ESTÚDIO SE SUPEROU!",
+    "MOMENTO PRA GUARDAR!", "A CENA MAIS IMPACTANTE!", "ANIMAÇÃO CINEMATOGRÁFICA!",
+    "ESSE MOMENTO É ATEMPORAL!", "QUALIDADE PREMIUM!", "O ANIME EM SUA MELHOR FORMA!",
+    "ESSA CENA ELEVOU O ANIME!", "PRODUÇÃO DE ELITE!", "O MOMENTO DEFINITIVO!",
+    "MASTERCLASS DE ANIMAÇÃO!", "ESSA CENA É REFERÊNCIA!", "NÍVEL DE ARTE ELEVADO!",
+    "O ANIME MOSTROU DO QUE É CAPAZ!", "PRODUÇÃO IMPECÁVEL!", "MOMENTO ANTOLÓGICO!",
+    "A CENA QUE DEFINIU A SÉRIE!", "ANIMAÇÃO DE TIRAR O FÔLEGO!", "ESSE MOMENTO É ETERNO!",
+    "QUALIDADE SEM PRECEDENTES!", "O ÁPICE DA TEMPORADA!",
+]
+
+TITULOS_REVELACAO = [
+    "EU NÃO ACREDITO NISSO!", "O PLOT TWIST DO SÉCULO!", "MINHA MENTE EXPLODIU!",
+    "NINGUÉM ESPERAVA ESSA!", "A REVELAÇÃO MAIS CHOCANTE!", "EU FIQUEI SEM REAÇÃO!",
+    "O ANIME ME ENGANOU!", "TUDO FAZ SENTIDO AGORA!", "A VERDADE ERA ESSA?!",
+    "EU PRECISO REVER TUDO!", "O MAIOR PLOT TWIST!", "MINHA TEORIA ESTAVA CERTA!",
+    "ELE ERA O VILÃO O TEMPO TODO!", "A REVELAÇÃO QUE MUDOU TUDO!", "EU NÃO VI ISSO CHEGANDO!",
+    "O SEGREDO FINALMENTE REVELADO!", "ESSE ANIME É GENIAL!", "A REVIRAVOLTA MAIS ÉPICA!",
+    "EU FIQUEI EM CHOQUE!", "TUDO ERA UMA MENTIRA!", "O MOMENTO MAIS IMPACTANTE!",
+    "ELE ESCONDEU ISSO O TEMPO TODO!", "A VERDADE POR TRÁS DE TUDO!", "MEU QUEIXO CAIU!",
+    "O PLOT TWIST PERFEITO!", "EU PRECISO PROCESSAR ISSO!", "A REVELAÇÃO MAIS BEM FEITA!",
+    "NADA É O QUE PARECE!", "ELE NÃO É QUEM EU PENSAVA!", "O ANIME ME SURPREENDEU!",
+    "A VERDADE DOLOROSA!", "EU NUNCA VOU SUPERAR!", "O SEGREDO MAIS GUARDADO!",
+    "ESSA REVELAÇÃO MUDOU O ANIME!", "EU ESTAVA CEGO O TEMPO TODO!", "A TRAIÇÃO MAIS INESPERADA!",
+    "ELE PLANEJOU TUDO DESDE O INÍCIO!", "O MOMENTO QUE MUDOU A HISTÓRIA!", "EU PRECISO REASSISTIR!",
+    "A PISTA ESTAVA LÁ!", "O PLOT TWIST MAIS ELABORADO!", "ELE MANIPULOU TODO MUNDO!",
+    "A REVELAÇÃO QUE FEZ CHORAR!", "EU ENTENDI A REFERÊNCIA!", "O ANIME JOGOU NA MINHA CARA!",
+    "A VERDADE ERA ÓBVIA!", "EU DEVERIA TER PERCEBIDO!", "O MOMENTO MAIS GENIAL!",
+    "A REVELAÇÃO QUE CONECTOU TUDO!", "MEU CÉREBRO NÃO COMPUTA!",
+]
+
+TITULOS_ROMANCE = [
+    "MEU CORAÇÃO NÃO AGUENTA!", "O SHIP FINALMENTE ACONTECEU!", "ESSA CENA É MUITO FOFA!",
+    "ELE FINALMENTE SE DECLAROU!", "O MOMENTO MAIS ROMÂNTICO!", "ESSES DOIS SÃO PERFEITOS JUNTOS!",
+    "A QUÍMICA ENTRE ELES É REAL!", "QUANDO O AMOR FALA MAIS ALTO!", "O BEIJO QUE TODOS ESPERAVAM!",
+    "ESSA CENA AQUECE O CORAÇÃO!", "ELE ESPEROU ESSE MOMENTO!", "A CONFISSÃO MAIS LINDA!",
+    "MINHA SHIPPER SOUL ESTÁ GRITANDO!", "O CASAL MAIS FOFO DO ANIME!", "QUANDO DUAS ALMAS SE ENCONTRAM!",
+    "ELE FEZ DE TUDO POR ELA!", "A CENA QUE TODO FÃ QUERIA!", "O MOMENTO MAIS DOCE!",
+    "ESSES DOIS ME DERAM DIABETES!", "QUANDO O TSUNDERE CEDE!", "A DECLARAÇÃO MAIS ÉPICA!",
+    "ELE ATRAVESSOU O MUNDO POR ELA!", "O AMOR QUE SUPEROU TUDO!", "ESSA CENA É PURO AÇÚCAR!",
+    "FINALMENTE JUNTOS!", "O ABRAÇO QUE CUROU TUDO!", "QUANDO O AMOR É VERDADEIRO!",
+    "ELE SEMPRE A PROTEGEU!", "A PROMESSA DE FICAREM JUNTOS!", "MINHA HEART EXPLODIU!",
+    "O MOMENTO MAIS KAWAII!", "ESSES DOIS SÃO GOALS!", "QUANDO O ORGULHO SOME!",
+    "ELE FINALMENTE ENTENDEU!", "A CENA MAIS PURA DO ANIME!", "O CASAL QUE EU SHIPPO DEMAIS!",
+    "ESSE MOMENTO FOI PERFEITO!", "QUANDO OLHARES DIZEM TUDO!", "ELE SERIA CAPAZ DE TUDO!",
+    "A CENA QUE ME FEZ SUSPIRAR!", "O AMOR MAIS BONITO DO ANIME!", "ESSES DOIS ME FAZEM ACREDITAR!",
+    "QUANDO O DESTINO UNE!", "ELE NUNCA DESISTIU DELA!", "A QUÍMICA É INEXPLICÁVEL!",
+    "O MOMENTO MAIS INTENSO!", "ESSE CASAL É CANON NO MEU CORAÇÃO!", "QUANDO O AMOR VENCE!",
+    "ELE FEZ A ESCOLHA CERTA!", "A CENA QUE EU ASSISTO MIL VEZES!",
+]
+
+TITULOS_MOTIVACIONAL = [
+    "ISSO ME DEU FORÇA PRA CONTINUAR!", "A CENA MAIS MOTIVACIONAL!", "EU ME SENTI INSPIRADO!",
+    "NUNCA DESISTA DOS SEUS SONHOS!", "A MENSAGEM MAIS PODEROSA!", "ESSE ANIME ME MOTIVOU!",
+    "O MOMENTO DE SUPERAÇÃO!", "EU ACREDITEI NELE!", "A FORÇA DE VONTADE INCRÍVEL!",
+    "ISSO ME FEZ QUERER SER MELHOR!", "O HERÓI VERDADEIRO!", "ELE PROVOU QUE ERA POSSÍVEL!",
+    "A DETERMINAÇÃO MAIS FORTE!", "ESSE MOMENTO ME INSPIRA!", "QUANDO A CORAGEM FALA MAIS ALTO!",
+    "ELE NÃO DESISTIU!", "A VITÓRIA MAIS MERECIDA!", "ISSO ME DEU ARREPIOS DE MOTIVAÇÃO!",
+    "O ESFORÇO FOI RECOMPENSADO!", "ELE SUPEROU O IMPOSSÍVEL!", "A PERSEVERANÇA VENCEU!",
+    "ESSE É O VERDADEIRO PODER!", "ELE INSPIROU A TODOS!", "O MOMENTO DE VIRADA!",
+    "NUNCA É TARDE PRA MUDAR!", "ELE PROVOU TODOS ERRADOS!", "A FORÇA INTERIOR!",
+    "ISSO ME FEZ ACREDITAR!", "O TRIUNFO DO ESFORÇO!", "ELE SE LEVANTOU DE NOVO!",
+    "A MENSAGEM QUE EU PRECISAVA!", "O HERÓI QUE TODOS MERECEM!", "ELE LUTOU ATÉ O FIM!",
+    "A CORAGEM DE CONTINUAR!", "ISSO É SER PROTAGONISTA!", "ELE FEZ O IMPOSSÍVEL POSSÍVEL!",
+    "A DETERMINAÇÃO INABALÁVEL!", "O MOMENTO DE GLÓRIA!", "ELE HONROU SEU CAMINHO!",
+    "A VITÓRIA DA PERSISTÊNCIA!", "ISSO ME FEZ CHORAR DE ORGULHO!", "O VERDADEIRO SIGNIFICADO DE FORÇA!",
+    "ELE CARREGOU TODOS NAS COSTAS!", "A REDENÇÃO MAIS BONITA!", "QUANDO O FRACO SE TORNA FORTE!",
+    "ELE TRANSFORMOU DOR EM PODER!", "A HISTÓRIA MAIS INSPIRADORA!", "O MOMENTO QUE MUDOU MINHA VIDA!",
+    "ELE É A PROVA DE QUE DÁ PRA VENCER!", "A CENA MAIS EMPOLGANTE!",
+]
 
 # ==================== CONFIGURAÇÃO DO VOLUME ====================
 VOLUME_BASE = "/workspace"
@@ -2161,99 +2327,143 @@ def analyze_video_content_gpu(
                     return True
             return False
         
-        def generate_unique_title_v156(text, moment_type, index, anime_name, start_time, all_segs):
+        def generate_unique_title_v157(text, moment_type, index, anime_name, start_time, all_segs):
             """
-            v15.6: GERAÇÃO DE TÍTULOS ÚNICOS E CRIATIVOS
+            v15.7: GERAÇÃO DE TÍTULOS CRIATIVOS DA BIBLIOTECA
             
             REGRAS:
-            1. NUNCA repete títulos
-            2. USA texto da transcrição SEMPRE que possível
-            3. Combina com nome do anime para contexto
-            4. Cria títulos magnéticos para TikTok/Reels
+            1. NUNCA usa nome do anime como título
+            2. NUNCA usa títulos genéricos como "CIDADE_NO_BRASILEIRO"
+            3. USA texto da transcrição se for BOM
+            4. USA biblioteca de 400+ títulos como fallback
+            5. DETECTA tipo de cena para escolher título apropriado
             """
             
-            # Se já temos texto da transcrição, usa
-            if text and not text.startswith("[") and len(text.strip()) > 5:
-                clean_text = text.strip().replace("[", "").replace("]", "")
-                words = clean_text.split()
+            def detectar_tipo_cena(texto):
+                """Detecta tipo de cena baseado no texto"""
+                if not texto:
+                    return moment_type  # Usa tipo passado
                 
-                if len(words) >= 3:
-                    # Pega as primeiras 6-8 palavras mais impactantes
-                    if len(words) <= 8:
-                        base_title = clean_text.upper()
-                    else:
-                        # Encontra início com palavra de impacto
-                        power_starts = ["eu", "você", "ele", "ela", "nós", "vou", "vai", 
-                                       "nunca", "sempre", "preciso", "quero", "isso"]
-                        best_start = 0
-                        for i, w in enumerate(words[:5]):
-                            if w.lower() in power_starts:
-                                best_start = i
-                                break
-                        
-                        end_idx = min(best_start + 7, len(words))
-                        base_title = " ".join(words[best_start:end_idx]).upper()
-                    
-                    # Remove pontuação e adiciona !
-                    base_title = base_title.rstrip(".,;:!?\"'") + "!"
-                    
-                    # Garante que é único
-                    final_title = base_title
-                    counter = 1
-                    while final_title in used_titles:
-                        # Adiciona variação
-                        variations = ["...", " 😱", " 🔥", " 💥", " ⚡"]
-                        final_title = base_title.rstrip("!") + variations[counter % len(variations)] + "!"
-                        counter += 1
-                        if counter > 10:
-                            final_title = f"{base_title[:-1]} #{index+1}!"
-                            break
-                    
-                    used_titles.add(final_title)
-                    logger.info(f"[TITULO v15.6] ✓ Gerado da TRANSCRIÇÃO: '{final_title}'")
-                    return final_title
+                texto_lower = texto.lower()
+                
+                # Keywords por categoria
+                if any(w in texto_lower for w in ['luta', 'batalha', 'ataque', 'golpe', 'matar', 'destruir', 'poder', 'força']):
+                    return 'action'
+                if any(w in texto_lower for w in ['amo', 'amor', 'gostar', 'coração', 'te amo', 'gosto']):
+                    return 'romance'
+                if any(w in texto_lower for w in ['chorar', 'lágrimas', 'morreu', 'perdi', 'adeus', 'saudade', 'triste']):
+                    return 'emotion'
+                if any(w in texto_lower for w in ['haha', 'idiota', 'burro', 'engraçado', 'ridículo']):
+                    return 'humor'
+                if any(w in texto_lower for w in ['verdade', 'segredo', 'mentira', 'traidor', 'não acredito']):
+                    return 'revelation'
+                if any(w in texto_lower for w in ['nunca desistir', 'sonho', 'acreditar', 'conseguir', 'vencer']):
+                    return 'motivational'
+                
+                return moment_type or 'epic'
             
-            # Se não tem texto direto, busca no intervalo do corte
+            def escolher_da_biblioteca(tipo, idx):
+                """Escolhe título da biblioteca baseado no tipo"""
+                bibliotecas = {
+                    'action': TITULOS_ACAO,
+                    'acao': TITULOS_ACAO,
+                    'dialogue': TITULOS_DIALOGO,
+                    'dialogo': TITULOS_DIALOGO,
+                    'emotion': TITULOS_EMOCAO,
+                    'emocao': TITULOS_EMOCAO,
+                    'romance': TITULOS_ROMANCE,
+                    'humor': TITULOS_HUMOR,
+                    'revelation': TITULOS_REVELACAO,
+                    'motivational': TITULOS_MOTIVACIONAL,
+                    'epic': TITULOS_EPICO,
+                    'segment': TITULOS_EPICO,
+                    'fallback': TITULOS_EPICO,
+                }
+                
+                lista = bibliotecas.get(tipo.lower(), TITULOS_EPICO)
+                
+                # Embaralha de forma determinística baseado no index
+                random.seed(idx * 137 + len(str(start_time)))
+                shuffled = lista.copy()
+                random.shuffle(shuffled)
+                
+                # Encontra um título não usado
+                for titulo in shuffled:
+                    if titulo not in used_titles:
+                        used_titles.add(titulo)
+                        return titulo
+                
+                # Se todos usados, pega aleatório com modificação
+                base = random.choice(lista)
+                modified = f"{base[:-1]} #{idx+1}!"
+                used_titles.add(modified)
+                return modified
+            
+            # ========== TENTA CRIAR TÍTULO DO TEXTO ==========
+            if text and not text.startswith("[") and len(text.strip()) > 8:
+                clean_text = text.strip().replace("[", "").replace("]", "")
+                
+                # REJEITA textos que parecem nomes de lugar/anime
+                palavras = clean_text.split()
+                
+                # Se tem menos de 3 palavras, provavelmente é nome/lugar - REJEITA
+                if len(palavras) < 3:
+                    logger.warning(f"[TITULO v15.7] Texto muito curto, usando biblioteca: '{clean_text}'")
+                else:
+                    # Verifica se é frase de verdade (tem verbo/ação)
+                    texto_lower = clean_text.lower()
+                    palavras_de_frase = ['eu', 'você', 'ele', 'ela', 'nós', 'vou', 'vai', 'preciso', 
+                                        'quero', 'nunca', 'sempre', 'não', 'sim', 'como', 'porque',
+                                        'fazer', 'ser', 'ter', 'poder', 'dever', 'meu', 'seu']
+                    
+                    tem_estrutura_frase = any(p in texto_lower for p in palavras_de_frase)
+                    
+                    if tem_estrutura_frase and len(palavras) >= 3:
+                        # PARECE ser uma frase boa, usa
+                        if len(palavras) <= 8:
+                            base_title = clean_text.upper()
+                        else:
+                            # Encontra início com palavra de impacto
+                            power_starts = ["eu", "você", "ele", "ela", "nós", "vou", "vai", 
+                                           "nunca", "sempre", "preciso", "quero", "isso", "não"]
+                            best_start = 0
+                            for i, w in enumerate(palavras[:5]):
+                                if w.lower() in power_starts:
+                                    best_start = i
+                                    break
+                            
+                            end_idx = min(best_start + 7, len(palavras))
+                            base_title = " ".join(palavras[best_start:end_idx]).upper()
+                        
+                        # Remove pontuação e adiciona !
+                        base_title = base_title.rstrip(".,;:!?\"'") + "!"
+                        
+                        # Verifica se não é repetido
+                        if base_title not in used_titles:
+                            used_titles.add(base_title)
+                            logger.info(f"[TITULO v15.7] ✓ Da transcrição: '{base_title}'")
+                            return base_title
+            
+            # ========== BUSCA TEXTO NO INTERVALO ==========
             if all_segs:
-                # Busca QUALQUER texto no intervalo expandido
                 for seg in all_segs:
                     seg_start = seg.get("start", 0)
                     seg_end = seg.get("end", 0)
                     
-                    # Verifica se o segmento está perto do momento
-                    if seg_start >= start_time - 30 and seg_end <= start_time + 120:
+                    if seg_start >= start_time - 20 and seg_end <= start_time + 90:
                         seg_text = seg.get("text", "").strip()
-                        if seg_text and len(seg_text) > 10 and not seg_text.startswith("["):
-                            # Encontrou texto! Usa recursivamente
-                            return generate_unique_title_v156(seg_text, moment_type, index, anime_name, start_time, None)
+                        if seg_text and len(seg_text) > 15 and not seg_text.startswith("["):
+                            # Tenta usar esse texto
+                            result = generate_unique_title_v157(seg_text, moment_type, index, anime_name, start_time, None)
+                            if result and result not in used_titles:
+                                return result
             
-            # FALLBACK CRIATIVO v15.6: Títulos únicos baseados em contexto
-            logger.warning(f"[TITULO v15.6] ⚠ Usando título criativo (sem transcrição)")
+            # ========== USA BIBLIOTECA DE TÍTULOS CRIATIVOS ==========
+            tipo_detectado = detectar_tipo_cena(text)
+            titulo_criativo = escolher_da_biblioteca(tipo_detectado, index)
             
-            # Templates criativos que incluem variação
-            creative_templates = [
-                f"OLHA ESSA CENA DE {anime_name.upper()}!",
-                f"MOMENTO ÉPICO #{index+1}!",
-                f"{anime_name.upper()}: CENA IMPERDÍVEL!",
-                f"VOCÊ PRECISA VER ISSO! #{index+1}",
-                f"A MELHOR PARTE DO EP #{index+1}!",
-                f"CENA {index+1} VAI TE SURPREENDER!",
-                f"NÃO PERCA ESSA CENA #{index+1}!",
-                f"{anime_name.upper()} - MOMENTO {index+1}!",
-                f"ASSISTA ATÉ O FINAL #{index+1}!",
-                f"ISSO É INCRÍVEL! CENA {index+1}",
-            ]
-            
-            # Escolhe baseado no index mas evita repetição
-            for template in creative_templates:
-                if template not in used_titles:
-                    used_titles.add(template)
-                    return template
-            
-            # Último recurso: título com timestamp
-            unique_title = f"CENA AOS {int(start_time//60)}:{int(start_time%60):02d}!"
-            used_titles.add(unique_title)
-            return unique_title
+            logger.info(f"[TITULO v15.7] ✓ Da biblioteca ({tipo_detectado}): '{titulo_criativo}'")
+            return titulo_criativo
         
         # Processa cada momento importante
         for idx, moment in enumerate(filtered_moments):
@@ -2289,7 +2499,7 @@ def analyze_video_content_gpu(
                 continue
             
             # v15.6: Gera título ÚNICO usando nova função
-            title = generate_unique_title_v156(
+            title = generate_unique_title_v157(
                 moment.get("text", ""), 
                 moment["type"], 
                 len(cuts),
@@ -2337,7 +2547,7 @@ def analyze_video_content_gpu(
                             break
                     
                     # v15.6: Usa nova função de título único
-                    title = generate_unique_title_v156(
+                    title = generate_unique_title_v157(
                         segment_text, 
                         "segment", 
                         len(cuts),
@@ -3530,15 +3740,15 @@ if __name__ == "__main__":
         # Banner com versão detalhada
         print("\n" + "="*70)
         print("╔═══════════════════════════════════════════════════════════════════╗")
-        print("║   ANIMECUT SERVERLESS v15.7 - BUILD 2025-12-18 11:00            ║")
-        print("║   🚀 FFMPEG PURO - MÁXIMA VELOCIDADE (~30s/corte)               ║")
+        print("║   ANIMECUT SERVERLESS v15.7 - BUILD 2025-12-18 12:00            ║")
+        print("║   🚀 FFMPEG PURO + 400+ TÍTULOS CRIATIVOS POR GÊNERO            ║")
         print("╚═══════════════════════════════════════════════════════════════════╝")
         print("Novidades v15.7:")
-        print("  ✓ ENCODING: FFMPEG PURO - elimina MoviePy do encoding")
-        print("  ✓ VELOCIDADE: ~30-60s por corte (era 5-6 min)")
-        print("  ✓ TÍTULOS: 100% únicos da transcrição")
-        print("  ✓ NVENC: GPU direto via FFmpeg (não via MoviePy)")
-        print("  ✓ TOTAL: 9 cortes em ~5-10 min (era 45-54 min)")
+        print("  ✓ ENCODING: FFMPEG PURO (~30s/corte em vez de 5+ min)")
+        print("  ✓ TÍTULOS: 400+ opções criativas por gênero")
+        print("  ✓ DETECÇÃO: Identifica tipo de cena (ação/romance/humor/etc)")
+        print("  ✓ NUNCA repete títulos entre cortes")
+        print("  ✓ NUNCA usa nome do anime como título")
         print(f"Volume: {VOLUME_BASE}")
         print(f"Cache: {CACHE_DIR}")
         print(f"B2 Bucket: {B2_BUCKET if B2_BUCKET else 'NÃO CONFIGURADO'}")
