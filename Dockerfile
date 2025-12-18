@@ -1,18 +1,18 @@
-# ✂️ AnimeCut Serverless V15.7 - FFMPEG PURO ULTRAFAST
-# NOVIDADES: FFmpeg direto (sem MoviePy), ~30s/corte, NVENC GPU
+# ✂️ AnimeCut Serverless V15.7 - FFMPEG PURO + TÍTULOS CRIATIVOS
+# NOVIDADES: FFmpeg direto (~30s/corte), 400+ títulos criativos por gênero
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 # ==================== CACHE BUSTER ====================
 # IMPORTANTE: Mude este valor para forçar rebuild completo no RunPod
-ARG CACHEBUST=20251218_1100_V15_7_FFMPEG_PURO
+ARG CACHEBUST=20251218_1200_V15_7_TITULOS_CRIATIVOS
 RUN echo "Build timestamp: ${CACHEBUST}" > /BUILD_INFO && \
-    echo "V15.7 - FFMPEG PURO ULTRAFAST (~30s/corte)" >> /BUILD_INFO
+    echo "V15.7 - FFMPEG PURO + 400+ TÍTULOS CRIATIVOS" >> /BUILD_INFO
 
 WORKDIR /app
 
 # Variáveis de Ambiente
 ENV BUILD_VERSION="15.7"
-ENV BUILD_DATE="2025-12-18T11:00:00Z"
+ENV BUILD_DATE="2025-12-18T12:00:00Z"
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
@@ -152,7 +152,7 @@ RUN mkdir -p /usr/local/share/fonts/custom && \
 
 # ==================== 15. HANDLER - SEMPRE ATUALIZADO ====================
 # Este ARG invalida o cache para SEMPRE copiar o handler mais recente
-ARG HANDLER_VERSION=15.7_20251218_1100_FFMPEG_PURO
+ARG HANDLER_VERSION=15.7_20251218_1200_TITULOS_CRIATIVOS
 RUN echo "Handler version: ${HANDLER_VERSION}"
 
 # Copia handler (NUNCA usa cache devido ao ARG acima)
@@ -161,10 +161,10 @@ COPY handler.py .
 # Mostra versão no build log
 RUN echo "=== BUILD COMPLETO v15.7 ===" && \
     echo "Handler: ${HANDLER_VERSION}" && \
-    echo "Novidades: FFmpeg PURO (sem MoviePy), ~30s/corte, NVENC direto" && \
+    echo "Novidades: FFmpeg PURO, 400+ títulos criativos por gênero" && \
     echo "Fontes disponíveis:" && \
     ls -la /workspace/fonts/ && \
-    head -10 handler.py
+    head -20 handler.py
 
 # Verifica se NVENC está disponível no build
 RUN ffmpeg -encoders 2>/dev/null | grep nvenc || echo "NVENC será verificado em runtime"
