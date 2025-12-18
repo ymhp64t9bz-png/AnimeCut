@@ -7,7 +7,7 @@ Stack: Qwen 2.5, Whisper V3 Turbo, YOLOv8, DeepFilterNet, NVENC + MoviePy V1
 CORREÇÕES: Força KortexClipAI2 mesmo com variável ambiente errada
 """
 
-# ==================== IMPORTAÇÕES ESSENCIAIS ==================== 
+# ==================== IMPORTAÇÕES ESSENCIAIS ====================
 import os
 import sys
 import logging
@@ -1553,66 +1553,113 @@ def criar_titulo_simples(
         font = None
         font_path = None
         
-        # v15.5: Múltiplos diretórios de fontes
+        # v15.5b: Múltiplos diretórios de fontes (sistema + customizadas)
         font_dirs = [
             Path("/workspace/fonts"),
             Path("/app/fonts"),
             Path("/usr/local/share/fonts/custom"),
+            Path("/usr/share/fonts/truetype/dejavu"),
+            Path("/usr/share/fonts/truetype/liberation"),
+            Path("/usr/share/fonts/truetype/ubuntu"),
+            Path("/usr/share/fonts/truetype/freefont"),
             Path("/usr/share/fonts/truetype")
         ]
         
-        # Se font_family foi especificado, procura nas pastas de fontes
+        # Mapeamento de nomes de fontes para arquivos do sistema
+        system_font_mapping = {
+            'dejavusans-bold': '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+            'dejavusans': '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+            'liberation': '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+            'liberationsans-bold': '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+            'ubuntu': '/usr/share/fonts/truetype/ubuntu/Ubuntu-Bold.ttf',
+            'ubuntu-bold': '/usr/share/fonts/truetype/ubuntu/Ubuntu-Bold.ttf',
+            'freesans': '/usr/share/fonts/truetype/freefont/FreeSansBold.ttf',
+            'freesansbold': '/usr/share/fonts/truetype/freefont/FreeSansBold.ttf',
+        }
+        
+        # Se font_family foi especificado, procura
         if font_family:
             logger.info(f"[TITULO] Procurando fonte '{font_family}'...")
             
-            for fonts_dir in font_dirs:
-                if not fonts_dir.exists():
-                    continue
+            # Primeiro, verifica mapeamento do sistema
+            font_key = font_family.lower().replace(' ', '').replace('-', '')
+            if font_key in system_font_mapping:
+                mapped_path = system_font_mapping[font_key]
+                if os.path.exists(mapped_path):
+                    font_path = mapped_path
+                    logger.info(f"[TITULO] ✓ Fonte mapeada do sistema: {font_path}")
+            
+            # Se não encontrou no mapeamento, procura nas pastas
+            if not font_path:
+                for fonts_dir in font_dirs:
+                    if not fonts_dir.exists():
+                        continue
+                        
+                    possible_extensions = ['.ttf', '.otf', '.TTF', '.OTF', '']
                     
-                possible_extensions = ['.ttf', '.otf', '.TTF', '.OTF', '']
-                
-                # Procura pelo nome exato
-                for ext in possible_extensions:
-                    candidate = fonts_dir / f"{font_family}{ext}"
-                    if candidate.exists():
-                        font_path = str(candidate)
-                        logger.info(f"[TITULO] ✓ Fonte encontrada: {font_path}")
+                    # Procura pelo nome exato
+                    for ext in possible_extensions:
+                        candidate = fonts_dir / f"{font_family}{ext}"
+                        if candidate.exists():
+                            font_path = str(candidate)
+                            logger.info(f"[TITULO] ✓ Fonte encontrada: {font_path}")
+                            break
+                    
+                    if font_path:
                         break
-                
-                if font_path:
-                    break
-                
-                # Se não encontrou, procura case-insensitive
+                    
+                    # Se não encontrou, procura case-insensitive
+                    try:
+                        for f in fonts_dir.iterdir():
+                            if f.is_file():
+                                f_lower = f.stem.lower().replace(' ', '').replace('-', '')
+                                search_lower = font_family.lower().replace(' ', '').replace('-', '')
+                                
+                                # Verifica nome exato
+                                if f_lower == search_lower and f.suffix.lower() in ['.ttf', '.otf']:
+                                    font_path = str(f)
+                                    logger.info(f"[TITULO] ✓ Fonte encontrada (case-insensitive): {font_path}")
+                                    break
+                                # Verifica se contém o nome
+                                if search_lower in f_lower and f.suffix.lower() in ['.ttf', '.otf']:
+                                    font_path = str(f)
+                                    logger.info(f"[TITULO] ✓ Fonte parcial encontrada: {font_path}")
+                                    break
+                    except:
+                        pass
+                    
+                    if font_path:
+                        break
+            
+            # Se ainda não encontrou, tenta baixar do B2 (fontes customizadas)
+            if not font_path and s3_client and B2_AVAILABLE:
                 try:
-                    for f in fonts_dir.iterdir():
-                        if f.is_file():
-                            # Verifica nome exato (sem extensão)
-                            if f.stem.lower() == font_family.lower() and f.suffix.lower() in ['.ttf', '.otf']:
-                                font_path = str(f)
-                                logger.info(f"[TITULO] ✓ Fonte encontrada (case-insensitive): {font_path}")
-                                break
-                            # Verifica se o nome contém o font_family
-                            if font_family.lower() in f.stem.lower() and f.suffix.lower() in ['.ttf', '.otf']:
-                                font_path = str(f)
-                                logger.info(f"[TITULO] ✓ Fonte parcial encontrada: {font_path}")
-                                break
-                except:
-                    pass
-                
-                if font_path:
-                    break
+                    custom_fonts_b2 = [
+                        'Heinan.otf', 'HeroesLegend.ttf', 'Karina.ttf', 'PersonaAura.otf',
+                        'SuperCrawler.ttf', 'Kotton.otf', 'Blustrue.otf', 'Basketball.otf'
+                    ]
+                    
+                    for b2_font in custom_fonts_b2:
+                        if font_family.lower() in b2_font.lower().replace('.otf', '').replace('.ttf', ''):
+                            b2_key = f"fonts/{b2_font}"
+                            local_path = Path("/workspace/fonts") / b2_font
+                            
+                            try:
+                                logger.info(f"[TITULO] Tentando baixar fonte do B2: {b2_key}")
+                                local_path.parent.mkdir(parents=True, exist_ok=True)
+                                s3_client.download_file(B2_BUCKET, b2_key, str(local_path))
+                                
+                                if local_path.exists():
+                                    font_path = str(local_path)
+                                    logger.info(f"[TITULO] ✓ Fonte baixada do B2: {font_path}")
+                                    break
+                            except Exception as b2_err:
+                                logger.debug(f"[TITULO] Fonte não encontrada no B2: {b2_err}")
+                except Exception as e:
+                    logger.debug(f"[TITULO] Erro ao buscar fonte no B2: {e}")
             
             if not font_path:
-                logger.warning(f"[TITULO] ✗ Fonte '{font_family}' NÃO encontrada")
-                # Lista fontes disponíveis
-                for fonts_dir in font_dirs:
-                    if fonts_dir.exists():
-                        try:
-                            available = [f.name for f in fonts_dir.iterdir() if f.suffix.lower() in ['.ttf', '.otf']][:5]
-                            if available:
-                                logger.info(f"[TITULO] Fontes em {fonts_dir}: {available}")
-                        except:
-                            pass
+                logger.warning(f"[TITULO] ✗ Fonte '{font_family}' NÃO encontrada, usando fallback")
         
         # Se não encontrou fonte customizada, usa FONT_TO_USE padrão
         if not font_path and FONT_TO_USE and os.path.exists(FONT_TO_USE):
@@ -3395,13 +3442,13 @@ if __name__ == "__main__":
         # Banner com versão detalhada
         print("\n" + "="*70)
         print("╔═══════════════════════════════════════════════════════════════════╗")
-        print("║   ANIMECUT SERVERLESS v15.5 - BUILD 2025-12-18 08:00             ║")
+        print("║   ANIMECUT SERVERLESS v15.5c - BUILD 2025-12-18 09:30            ║")
         print("║   🚀 ULTRARRÁPIDO + TÍTULOS DA TRANSCRIÇÃO + FONTES              ║")
         print("╚═══════════════════════════════════════════════════════════════════╝")
-        print("Novidades v15.5:")
+        print("Novidades v15.5c:")
         print("  ✓ ENCODING: FFmpeg pipe NVENC (~60s por corte de 100s)")
         print("  ✓ TÍTULOS: Extrai texto REAL da transcrição para todos cortes")
-        print("  ✓ FONTES: 16 fontes customizadas incluídas")
+        print("  ✓ FONTES: 16 fontes customizadas (pasta 'fontes/')")
         print("  ✓ BACKGROUND: Download via S3 API (resolve 401)")
         print(f"Volume: {VOLUME_BASE}")
         print(f"Cache: {CACHE_DIR}")
