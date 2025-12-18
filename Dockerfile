@@ -1,18 +1,18 @@
-# ✂️ AnimeCut Serverless V15.5 - ULTRARRÁPIDO + TÍTULOS + FONTES
-# NOVIDADES: FFmpeg pipe NVENC, títulos da transcrição, 16 fontes customizadas
+# ✂️ AnimeCut Serverless V15.5c - ULTRARRÁPIDO + TÍTULOS + FONTES
+# NOVIDADES: FFmpeg pipe NVENC, títulos da transcrição, fontes customizadas
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 # ==================== CACHE BUSTER ====================
 # IMPORTANTE: Mude este valor para forçar rebuild completo no RunPod
-ARG CACHEBUST=20251218_0800_V15_5_ULTRAFAST_FONTS
+ARG CACHEBUST=20251218_0930_V15_5C_FONTES_FOLDER
 RUN echo "Build timestamp: ${CACHEBUST}" > /BUILD_INFO && \
-    echo "V15.5 - ULTRARRÁPIDO + TÍTULOS DA TRANSCRIÇÃO + FONTES" >> /BUILD_INFO
+    echo "V15.5c - ULTRARRÁPIDO + TÍTULOS + FONTES CUSTOMIZADAS" >> /BUILD_INFO
 
 WORKDIR /app
 
 # Variáveis de Ambiente
-ENV BUILD_VERSION="15.5"
-ENV BUILD_DATE="2025-12-18T08:00:00Z"
+ENV BUILD_VERSION="15.5c"
+ENV BUILD_DATE="2025-12-18T09:30:00Z"
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
@@ -23,7 +23,7 @@ ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
 
 # ==================== 1. DEPENDÊNCIAS DE SISTEMA + cuDNN 9 ====================
-# Instala cuDNN 9.x que é necessário para ctranslate2/faster-whisper recentes 
+# Instala cuDNN 9.x que é necessário para ctranslate2/faster-whisper recentes
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3-dev \
@@ -121,11 +121,20 @@ RUN python3 -c "import ctranslate2; print(f'CTranslate2: {ctranslate2.__version_
 RUN python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 
 # ==================== 14. FONTES CUSTOMIZADAS ====================
-# Cria diretório de fontes e copia todas as fontes customizadas
+# Instala pacotes de fontes do sistema
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-dejavu-core \
+    fonts-dejavu-extra \
+    fonts-liberation \
+    fonts-freefont-ttf \
+    fontconfig \
+    && rm -rf /var/lib/apt/lists/*
+
+# Cria diretórios de fontes
 RUN mkdir -p /app/fonts /workspace/fonts
 
-# Copia as fontes para o diretório de fontes
-COPY fonts/ /app/fonts/
+# Copia as fontes customizadas (pasta 'fontes' no repositório)
+COPY fontes/ /app/fonts/
 
 # Cria links simbólicos em /workspace/fonts (onde o handler procura)
 RUN for font in /app/fonts/*; do \
@@ -133,27 +142,28 @@ RUN for font in /app/fonts/*; do \
             ln -sf "$font" /workspace/fonts/$(basename "$font"); \
         fi; \
     done && \
-    ls -la /workspace/fonts/ || echo "Fontes serão criadas em runtime"
+    echo "Fontes copiadas:" && \
+    ls -la /workspace/fonts/
 
-# Também instala no sistema para fallback
+# Instala fontes no sistema
 RUN mkdir -p /usr/local/share/fonts/custom && \
     cp /app/fonts/* /usr/local/share/fonts/custom/ 2>/dev/null || true && \
-    fc-cache -fv 2>/dev/null || true
+    fc-cache -fv
 
 # ==================== 15. HANDLER - SEMPRE ATUALIZADO ====================
 # Este ARG invalida o cache para SEMPRE copiar o handler mais recente
-ARG HANDLER_VERSION=15.5_20251218_0800_ULTRAFAST_FONTS
+ARG HANDLER_VERSION=15.5c_20251218_0930_FONTES_FOLDER
 RUN echo "Handler version: ${HANDLER_VERSION}"
 
 # Copia handler (NUNCA usa cache devido ao ARG acima)
 COPY handler.py .
 
 # Mostra versão no build log
-RUN echo "=== BUILD COMPLETO v15.5 ===" && \
+RUN echo "=== BUILD COMPLETO v15.5c ===" && \
     echo "Handler: ${HANDLER_VERSION}" && \
-    echo "Novidades: FFmpeg pipe NVENC, títulos da transcrição, 16 fontes" && \
+    echo "Novidades: FFmpeg pipe NVENC, títulos da transcrição, fontes customizadas" && \
     echo "Fontes disponíveis:" && \
-    ls -la /app/fonts/ 2>/dev/null || echo "Fontes não encontradas" && \
+    ls -la /workspace/fonts/ && \
     head -10 handler.py
 
 # Verifica se NVENC está disponível no build
