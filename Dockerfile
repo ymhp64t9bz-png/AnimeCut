@@ -1,18 +1,18 @@
-# ✂️ AnimeCut Serverless V15.1 - TÍTULOS MAGNÉTICOS + DIAGNÓSTICO
-# NOVIDADES: Títulos chamativos, Log detalhado, NVENC forçado
+# ✂️ AnimeCut Serverless V15.2 - TÍTULOS DA TRANSCRIÇÃO + ENCODING DIRETO
+# NOVIDADES: Títulos do diálogo real, sem RAW intermediário, economiza disco
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 # ==================== CACHE BUSTER ====================
 # IMPORTANTE: Mude este valor para forçar rebuild completo no RunPod
-ARG CACHEBUST=20251217_2300_V15_1_MAGNETIC_TITLES
+ARG CACHEBUST=20251218_0300_V15_2_TRANSCRIPTION_TITLES
 RUN echo "Build timestamp: ${CACHEBUST}" > /BUILD_INFO && \
-    echo "V15.1 - TÍTULOS MAGNÉTICOS + DIAGNÓSTICO" >> /BUILD_INFO
+    echo "V15.2 - TÍTULOS DA TRANSCRIÇÃO + ENCODING DIRETO" >> /BUILD_INFO
 
 WORKDIR /app
 
 # Variáveis de Ambiente
-ENV BUILD_VERSION="15.1"
-ENV BUILD_DATE="2025-12-17T23:00:00Z"
+ENV BUILD_VERSION="15.2"
+ENV BUILD_DATE="2025-12-18T03:00:00Z"
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
@@ -122,16 +122,16 @@ RUN python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 
 # ==================== 14. HANDLER - SEMPRE ATUALIZADO ====================
 # Este ARG invalida o cache para SEMPRE copiar o handler mais recente
-ARG HANDLER_VERSION=15.1_20251217_2300_MAGNETIC_TITLES
+ARG HANDLER_VERSION=15.2_20251218_0300_TRANSCRIPTION_TITLES
 RUN echo "Handler version: ${HANDLER_VERSION}"
 
 # Copia handler (NUNCA usa cache devido ao ARG acima)
 COPY handler.py .
 
 # Mostra versão no build log
-RUN echo "=== BUILD COMPLETO v15.1 ===" && \
+RUN echo "=== BUILD COMPLETO v15.2 ===" && \
     echo "Handler: ${HANDLER_VERSION}" && \
-    echo "Novidades: Títulos Magnéticos, Diagnóstico Completo, NVENC" && \
+    echo "Novidades: Títulos da Transcrição, Encoding Direto, Sem RAW" && \
     head -10 handler.py
 
 # Verifica se NVENC está disponível no build
