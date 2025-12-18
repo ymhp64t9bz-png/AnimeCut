@@ -1000,10 +1000,10 @@ def download_video(url: str) -> str:
 def download_background(url: str) -> Optional[str]:
     """Download de background com cache e validação
     
-    v14.0: Melhor suporte para URLs de storage (B2, S3, Replit, etc)
+    v15.4: Usa S3 API com credenciais quando URL pública retorna 401
     """
     logger.info("=" * 50)
-    logger.info("[BACKGROUND v14] INICIANDO DOWNLOAD")
+    logger.info("[BACKGROUND v15.4] INICIANDO DOWNLOAD")
     logger.info(f"  URL recebida: {url}")
     logger.info("=" * 50)
     
@@ -1050,13 +1050,16 @@ def download_background(url: str) -> Optional[str]:
             'Accept-Language': 'en-US,en;q=0.9'
         }
         
-        # Tenta download com requests
+        download_success = False
+        got_401 = False
+        
+        # ========== MÉTODO 1: Download direto (URL pública) ==========
         try:
             import requests
-            logger.info(f"[BACKGROUND] Tentando requests.get...")
+            logger.info(f"[BACKGROUND] Método 1: URL pública...")
             
             response = requests.get(url, headers=headers, timeout=60, stream=True, allow_redirects=True)
-            logger.info(f"[BACKGROUND] Status: {response.status_code}")
+            logger.info(f"[BACKGROUND] Status HTTP: {response.status_code}")
             
             if response.status_code == 200:
                 with open(temp_file, 'wb') as f:
@@ -1064,57 +1067,144 @@ def download_background(url: str) -> Optional[str]:
                         if chunk:
                             f.write(chunk)
                 
-                if temp_file.exists():
-                    file_size = temp_file.stat().st_size
-                    logger.info(f"[BACKGROUND] Arquivo salvo: {file_size/1024:.1f} KB")
+                if temp_file.exists() and temp_file.stat().st_size > 500:
+                    logger.info(f"[BACKGROUND] ✓ Download OK via URL pública")
+                    download_success = True
                     
-                    if file_size > 500:  # Pelo menos 500 bytes
-                        logger.info(f"[BACKGROUND] ✓ Download OK: {temp_file}")
-                        return str(temp_file)
-                    else:
-                        logger.warning(f"[BACKGROUND] Arquivo muito pequeno: {file_size} bytes")
-            else:
-                logger.warning(f"[BACKGROUND] HTTP {response.status_code}")
+            elif response.status_code == 401:
+                logger.warning(f"[BACKGROUND] HTTP 401 - Bucket não é público, tentando via S3 API...")
+                got_401 = True
                 
         except Exception as req_error:
-            logger.warning(f"[BACKGROUND] Erro requests: {req_error}")
+            logger.warning(f"[BACKGROUND] Erro URL pública: {req_error}")
         
-        # Fallback: tenta com urllib
-        try:
-            import urllib.request
-            logger.info("[BACKGROUND] Tentando urllib...")
+        # ========== MÉTODO 2: Download via S3 API (quando 401) ==========
+        if not download_success and 'backblazeb2.com' in url.lower():
+            logger.info("[BACKGROUND] Método 2: S3 API com credenciais...")
             
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=60) as response:
-                with open(temp_file, 'wb') as f:
-                    f.write(response.read())
-            
-            if temp_file.exists() and temp_file.stat().st_size > 500:
-                logger.info(f"[BACKGROUND] ✓ Download via urllib OK: {temp_file}")
-                return str(temp_file)
+            try:
+                # Extrai bucket e file path da URL
+                # Formatos possíveis:
+                # https://f005.backblazeb2.com/file/BUCKET/path/to/file.png
+                # https://s3.us-east-005.backblazeb2.com/BUCKET/path/to/file.png
+                import re
                 
-        except Exception as urllib_error:
-            logger.warning(f"[BACKGROUND] Erro urllib: {urllib_error}")
+                file_key = None
+                bucket_from_url = None
+                
+                # Tenta formato f005 (URL pública)
+                match = re.search(r'backblazeb2\.com/file/([^/]+)/(.+)', url)
+                if match:
+                    bucket_from_url = match.group(1)
+                    file_key = match.group(2)
+                    logger.info(f"[BACKGROUND] Formato f005 detectado")
+                
+                # Tenta formato s3 (URL S3 API)
+                if not file_key:
+                    match = re.search(r's3\.[^/]+\.backblazeb2\.com/([^/]+)/(.+)', url)
+                    if match:
+                        bucket_from_url = match.group(1)
+                        file_key = match.group(2)
+                        logger.info(f"[BACKGROUND] Formato S3 detectado")
+                
+                if file_key and bucket_from_url:
+                    logger.info(f"[BACKGROUND] Bucket: {bucket_from_url}")
+                    logger.info(f"[BACKGROUND] Key: {file_key}")
+                    
+                    # Usa o s3_client global que já está configurado
+                    if s3_client and B2_AVAILABLE:
+                        try:
+                            logger.info(f"[BACKGROUND] Baixando via S3 API...")
+                            s3_client.download_file(
+                                Bucket=bucket_from_url,
+                                Key=file_key,
+                                Filename=str(temp_file)
+                            )
+                            
+                            if temp_file.exists() and temp_file.stat().st_size > 500:
+                                file_size = temp_file.stat().st_size
+                                logger.info(f"[BACKGROUND] ✓ Download OK via S3 API ({file_size/1024:.1f} KB)")
+                                download_success = True
+                                
+                        except Exception as s3_error:
+                            logger.warning(f"[BACKGROUND] Erro S3 API: {s3_error}")
+                            
+                            # Tenta com get_object como alternativa
+                            try:
+                                logger.info("[BACKGROUND] Tentando get_object...")
+                                response = s3_client.get_object(Bucket=bucket_from_url, Key=file_key)
+                                with open(temp_file, 'wb') as f:
+                                    f.write(response['Body'].read())
+                                
+                                if temp_file.exists() and temp_file.stat().st_size > 500:
+                                    logger.info(f"[BACKGROUND] ✓ Download OK via get_object")
+                                    download_success = True
+                            except Exception as get_error:
+                                logger.warning(f"[BACKGROUND] Erro get_object: {get_error}")
+                    else:
+                        logger.warning("[BACKGROUND] S3 client não disponível!")
+                else:
+                    logger.warning(f"[BACKGROUND] Não conseguiu extrair bucket/key da URL")
+                    
+            except Exception as b2_error:
+                logger.warning(f"[BACKGROUND] Erro B2: {b2_error}")
+                import traceback
+                logger.warning(traceback.format_exc())
         
-        # Fallback: tenta com curl via subprocess
-        try:
-            logger.info("[BACKGROUND] Tentando curl...")
-            cmd = ['curl', '-L', '-o', str(temp_file), '-A', headers['User-Agent'], url]
-            result = subprocess.run(cmd, capture_output=True, timeout=60)
-            
-            if temp_file.exists() and temp_file.stat().st_size > 500:
-                logger.info(f"[BACKGROUND] ✓ Download via curl OK: {temp_file}")
-                return str(temp_file)
+        # ========== MÉTODO 3: Fallback urllib ==========
+        if not download_success and not got_401:
+            try:
+                import urllib.request
+                logger.info("[BACKGROUND] Método 3: urllib...")
                 
-        except Exception as curl_error:
-            logger.warning(f"[BACKGROUND] Erro curl: {curl_error}")
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=60) as response:
+                    with open(temp_file, 'wb') as f:
+                        f.write(response.read())
+                
+                if temp_file.exists() and temp_file.stat().st_size > 500:
+                    logger.info(f"[BACKGROUND] ✓ Download OK via urllib")
+                    download_success = True
+                    
+            except Exception as urllib_error:
+                logger.warning(f"[BACKGROUND] Erro urllib: {urllib_error}")
+        
+        # ========== MÉTODO 4: Fallback curl ==========
+        if not download_success and not got_401:
+            try:
+                logger.info("[BACKGROUND] Método 4: curl...")
+                cmd = ['curl', '-L', '-s', '-o', str(temp_file), '-A', headers['User-Agent'], url]
+                result = subprocess.run(cmd, capture_output=True, timeout=60)
+                
+                if temp_file.exists() and temp_file.stat().st_size > 500:
+                    logger.info(f"[BACKGROUND] ✓ Download OK via curl")
+                    download_success = True
+                    
+            except Exception as curl_error:
+                logger.warning(f"[BACKGROUND] Erro curl: {curl_error}")
+        
+        # ========== RESULTADO ==========
+        if download_success and temp_file.exists():
+            file_size = temp_file.stat().st_size
+            logger.info("=" * 50)
+            logger.info(f"[BACKGROUND] ✓ SUCESSO!")
+            logger.info(f"  Arquivo: {temp_file}")
+            logger.info(f"  Tamanho: {file_size/1024:.1f} KB")
+            logger.info("=" * 50)
+            return str(temp_file)
             
     except Exception as e:
         logger.error(f"[BACKGROUND] Erro geral: {e}")
         import traceback
         logger.error(traceback.format_exc())
     
+    logger.error("=" * 50)
     logger.error("[BACKGROUND] ✗ TODAS AS TENTATIVAS FALHARAM")
+    if got_401:
+        logger.error("[BACKGROUND] ⚠️ CAUSA: Bucket B2 retornou 401 (não público)")
+        logger.error("[BACKGROUND] ⚠️ E o download via S3 API também falhou")
+        logger.error("[BACKGROUND] ⚠️ VERIFICAR: Credenciais B2 têm permissão de leitura?")
+    logger.error("=" * 50)
     return None
 
 # ==================== SENSOR DE ADRENALINA OTIMIZADO ====================
@@ -2488,77 +2578,83 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
         output_filename = f"cut_{num}_{safe_title}_{uuid.uuid4().hex[:6]}.mp4"
         output_path = OUTPUT_DIR / output_filename
         
-        # ==================== ENCODING v15.3 - ULTRARRÁPIDO ====================
-        # ESTRATÉGIA: Encoding DIRETO com h264_nvenc, SEM arquivo RAW
-        # Tempo esperado: 30-60 segundos por corte (vs 5 minutos anterior)
+        # ==================== ENCODING v15.4 - OTIMIZADO ====================
+        # CORREÇÕES:
+        # - Remove preset p5 que causa Broken Pipe
+        # - Usa libx264 ultrafast como principal (mais confiável)
+        # - NVENC como fallback se libx264 falhar
         
         logger.info("=" * 60)
-        logger.info("[ENCODING v15.3] ULTRARRÁPIDO - NVENC DIRETO")
+        logger.info("[ENCODING v15.4] OTIMIZADO E CONFIÁVEL")
         logger.info("=" * 60)
         
         start_encode = time.time()
-        
-        # Verifica NVENC
-        nvenc_available = False
-        try:
-            result = subprocess.run(['ffmpeg', '-hide_banner', '-encoders'], 
-                                   capture_output=True, text=True, timeout=10)
-            nvenc_available = 'h264_nvenc' in result.stdout
-            logger.info(f"[NVENC] Disponível: {'✓ SIM' if nvenc_available else '✗ NÃO'}")
-        except:
-            pass
-        
-        # Log de GPU
-        if GPU_AVAILABLE and torch:
-            try:
-                gpu_name = torch.cuda.get_device_name(0)
-                logger.info(f"[GPU] {gpu_name}")
-            except:
-                pass
-        
-        # Duração do corte
         cut_duration = end - start
         logger.info(f"[CORTE] Duração: {cut_duration:.1f}s")
         
-        # ENCODING DIRETO - sem RAW intermediário
+        # Verifica espaço em disco
+        try:
+            import shutil
+            disk_free = shutil.disk_usage(TEMP_DIR).free / (1024**3)
+            logger.info(f"[DISCO] Espaço livre: {disk_free:.1f} GB")
+            if disk_free < 2:
+                # Limpa arquivos temporários
+                for f in TEMP_DIR.glob("*.m4a"):
+                    try: f.unlink()
+                    except: pass
+                for f in TEMP_DIR.glob("*.wav"):
+                    try: f.unlink()
+                    except: pass
+        except:
+            pass
+        
         encoding_success = False
         temp_audio = TEMP_DIR / f"audio_{num}_{uuid.uuid4().hex[:6]}.m4a"
         
-        # Codecs para tentar (NVENC primeiro)
-        codecs_to_try = []
-        if nvenc_available:
-            codecs_to_try.append(('h264_nvenc', 'p5'))  # p5 = mais rápido com boa qualidade
-        codecs_to_try.append(('libx264', 'ultrafast'))   # CPU ultrafast como fallback
+        # ESTRATÉGIA v15.4:
+        # 1. libx264 ultrafast (mais confiável, ainda rápido)
+        # 2. libx264 veryfast (se ultrafast falhar)
+        # 3. NVENC apenas se CPU falhar
         
-        for codec, preset in codecs_to_try:
+        codecs_to_try = [
+            ('libx264', 'ultrafast', ['-pix_fmt', 'yuv420p', '-crf', '28', '-movflags', '+faststart']),
+            ('libx264', 'veryfast', ['-pix_fmt', 'yuv420p', '-crf', '26', '-movflags', '+faststart']),
+        ]
+        
+        # Adiciona NVENC apenas como último recurso
+        try:
+            result = subprocess.run(['ffmpeg', '-hide_banner', '-encoders'], 
+                                   capture_output=True, text=True, timeout=10)
+            if 'h264_nvenc' in result.stdout:
+                # NVENC com configurações mais conservadoras
+                codecs_to_try.append(('h264_nvenc', 'default', [
+                    '-pix_fmt', 'yuv420p',
+                    '-b:v', '5M',
+                    '-maxrate', '8M', 
+                    '-bufsize', '16M',
+                    '-movflags', '+faststart'
+                ]))
+        except:
+            pass
+        
+        for codec, preset, ffmpeg_params in codecs_to_try:
             try:
-                logger.info(f"[ENCODING] Usando {codec} (preset={preset})...")
+                logger.info(f"[ENCODING] Tentando {codec} (preset={preset})...")
                 
-                # Configuração otimizada por codec
-                if codec == 'h264_nvenc':
-                    ffmpeg_params = [
-                        '-pix_fmt', 'yuv420p',
-                        '-b:v', '6M',           # Bitrate menor = mais rápido
-                        '-maxrate', '10M',
-                        '-bufsize', '20M',
-                        '-movflags', '+faststart'
-                    ]
-                else:
-                    ffmpeg_params = [
-                        '-pix_fmt', 'yuv420p',
-                        '-crf', '26',           # CRF maior = mais rápido
-                        '-movflags', '+faststart'
-                    ]
+                # Limpa arquivo anterior se existir
+                if output_path.exists():
+                    try: output_path.unlink()
+                    except: pass
                 
-                # MoviePy write_videofile com encoding DIRETO
+                # MoviePy write_videofile
                 final.write_videofile(
                     str(output_path),
                     codec=codec,
-                    preset=preset,
+                    preset=preset if preset != 'default' else None,
                     audio_codec='aac',
-                    audio_bitrate='128k',       # Bitrate áudio menor
-                    threads=12,                  # Mais threads
-                    fps=24,                      # FPS fixo (economiza processamento)
+                    audio_bitrate='128k',
+                    threads=8,
+                    fps=24,
                     ffmpeg_params=ffmpeg_params,
                     logger=None,
                     verbose=False,
@@ -2571,29 +2667,27 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
                     encoding_success = True
                     encode_time = time.time() - start_encode
                     file_size = output_path.stat().st_size / 1e6
-                    speed = cut_duration / encode_time
+                    speed = cut_duration / encode_time if encode_time > 0 else 0
                     
                     logger.info("=" * 60)
                     logger.info(f"[✓ SUCCESS] Corte {num} finalizado!")
                     logger.info(f"    Arquivo: {file_size:.1f} MB")
                     logger.info(f"    Tempo: {encode_time:.1f}s")
-                    logger.info(f"    Velocidade: {speed:.1f}x realtime")
-                    logger.info(f"    Codec: {codec}")
+                    logger.info(f"    Velocidade: {speed:.2f}x realtime")
+                    logger.info(f"    Codec: {codec} ({preset})")
                     logger.info("=" * 60)
                     break
                 else:
-                    raise Exception("Arquivo inválido")
+                    raise Exception("Arquivo inválido ou muito pequeno")
                     
             except Exception as e:
-                error_msg = str(e)[:150]
+                error_msg = str(e)[:100]
                 logger.warning(f"[WARNING] {codec} falhou: {error_msg}")
                 
-                # Limpa arquivo parcial
+                # Limpa arquivos parciais
                 if output_path.exists():
                     try: output_path.unlink()
                     except: pass
-                
-                # Limpa áudio temporário
                 if temp_audio.exists():
                     try: temp_audio.unlink()
                     except: pass
@@ -3131,15 +3225,14 @@ if __name__ == "__main__":
         # Banner com versão detalhada
         print("\n" + "="*70)
         print("╔═══════════════════════════════════════════════════════════════════╗")
-        print("║   ANIMECUT SERVERLESS v15.3 - BUILD 2025-12-18 04:00             ║")
-        print("║   🚀 ULTRARRÁPIDO - NVENC DIRETO - SEM RAW                       ║")
+        print("║   ANIMECUT SERVERLESS v15.4 - BUILD 2025-12-18 06:00             ║")
+        print("║   🔧 BACKGROUND S3 API + ENCODING CONFIÁVEL                      ║")
         print("╚═══════════════════════════════════════════════════════════════════╝")
-        print("Novidades v15.3:")
-        print("  ✓ ULTRARRÁPIDO: Encoding direto sem RAW intermediário")
-        print("  ✓ NVENC p5: Preset mais rápido com boa qualidade")
-        print("  ✓ FPS FIXO 24: Economiza processamento")
-        print("  ✓ THREADS 12: Máximo paralelismo")
-        print("  ✓ TEMPO ESPERADO: ~30-60s por corte (vs 5min anterior)")
+        print("Novidades v15.4:")
+        print("  ✓ BACKGROUND: Download via S3 API quando URL pública retorna 401")
+        print("  ✓ ENCODING: libx264 ultrafast como principal (mais confiável)")
+        print("  ✓ NVENC: Apenas como fallback com config conservadora")
+        print("  ✓ CORREÇÃO: Broken Pipe do NVENC resolvido")
         print(f"Volume: {VOLUME_BASE}")
         print(f"Cache: {CACHE_DIR}")
         print(f"B2 Bucket: {B2_BUCKET if B2_BUCKET else 'NÃO CONFIGURADO'}")
