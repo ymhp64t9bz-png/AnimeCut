@@ -1,18 +1,18 @@
-# ✂️ AnimeCut Serverless V15.3 - ULTRARRÁPIDO - NVENC DIRETO
-# NOVIDADES: Encoding direto, sem RAW, preset p5, FPS fixo 24, 12 threads
+# ✂️ AnimeCut Serverless V15.4 - BACKGROUND S3 API + ENCODING CONFIÁVEL
+# NOVIDADES: Download B2 via S3 API, encoding libx264 ultrafast, correção broken pipe
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 # ==================== CACHE BUSTER ====================
 # IMPORTANTE: Mude este valor para forçar rebuild completo no RunPod
-ARG CACHEBUST=20251218_0400_V15_3_ULTRAFAST
+ARG CACHEBUST=20251218_0600_V15_4_S3_DOWNLOAD
 RUN echo "Build timestamp: ${CACHEBUST}" > /BUILD_INFO && \
-    echo "V15.3 - ULTRARRÁPIDO - NVENC DIRETO" >> /BUILD_INFO
+    echo "V15.4 - BACKGROUND S3 API + ENCODING CONFIÁVEL" >> /BUILD_INFO
 
 WORKDIR /app
 
 # Variáveis de Ambiente
-ENV BUILD_VERSION="15.3"
-ENV BUILD_DATE="2025-12-18T04:00:00Z"
+ENV BUILD_VERSION="15.4"
+ENV BUILD_DATE="2025-12-18T06:00:00Z"
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
@@ -122,16 +122,16 @@ RUN python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 
 # ==================== 14. HANDLER - SEMPRE ATUALIZADO ====================
 # Este ARG invalida o cache para SEMPRE copiar o handler mais recente
-ARG HANDLER_VERSION=15.3_20251218_0400_ULTRAFAST
+ARG HANDLER_VERSION=15.4_20251218_0600_S3_DOWNLOAD
 RUN echo "Handler version: ${HANDLER_VERSION}"
 
 # Copia handler (NUNCA usa cache devido ao ARG acima)
 COPY handler.py .
 
 # Mostra versão no build log
-RUN echo "=== BUILD COMPLETO v15.3 ULTRARRÁPIDO ===" && \
+RUN echo "=== BUILD COMPLETO v15.4 ===" && \
     echo "Handler: ${HANDLER_VERSION}" && \
-    echo "Novidades: NVENC Direto, Sem RAW, p5 preset, 12 threads" && \
+    echo "Novidades: Background S3 API, libx264 ultrafast, correção broken pipe" && \
     head -10 handler.py
 
 # Verifica se NVENC está disponível no build
