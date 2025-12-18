@@ -1,18 +1,18 @@
-# ✂️ AnimeCut Serverless V15.4 - BACKGROUND S3 API + ENCODING CONFIÁVEL
-# NOVIDADES: Download B2 via S3 API, encoding libx264 ultrafast, correção broken pipe
+# ✂️ AnimeCut Serverless V15.5 - ULTRARRÁPIDO + TÍTULOS + FONTES
+# NOVIDADES: FFmpeg pipe NVENC, títulos da transcrição, 16 fontes customizadas
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 # ==================== CACHE BUSTER ====================
 # IMPORTANTE: Mude este valor para forçar rebuild completo no RunPod
-ARG CACHEBUST=20251218_0600_V15_4_S3_DOWNLOAD
+ARG CACHEBUST=20251218_0800_V15_5_ULTRAFAST_FONTS
 RUN echo "Build timestamp: ${CACHEBUST}" > /BUILD_INFO && \
-    echo "V15.4 - BACKGROUND S3 API + ENCODING CONFIÁVEL" >> /BUILD_INFO
+    echo "V15.5 - ULTRARRÁPIDO + TÍTULOS DA TRANSCRIÇÃO + FONTES" >> /BUILD_INFO
 
 WORKDIR /app
 
 # Variáveis de Ambiente
-ENV BUILD_VERSION="15.4"
-ENV BUILD_DATE="2025-12-18T06:00:00Z"
+ENV BUILD_VERSION="15.5"
+ENV BUILD_DATE="2025-12-18T08:00:00Z"
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
@@ -120,18 +120,40 @@ RUN python3 -c "import ctranslate2; print(f'CTranslate2: {ctranslate2.__version_
 # Pré-carrega YOLO para evitar delays na primeira requisição
 RUN python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 
-# ==================== 14. HANDLER - SEMPRE ATUALIZADO ====================
+# ==================== 14. FONTES CUSTOMIZADAS ====================
+# Cria diretório de fontes e copia todas as fontes customizadas
+RUN mkdir -p /app/fonts /workspace/fonts
+
+# Copia as fontes para o diretório de fontes
+COPY fonts/ /app/fonts/
+
+# Cria links simbólicos em /workspace/fonts (onde o handler procura)
+RUN for font in /app/fonts/*; do \
+        if [ -f "$font" ]; then \
+            ln -sf "$font" /workspace/fonts/$(basename "$font"); \
+        fi; \
+    done && \
+    ls -la /workspace/fonts/ || echo "Fontes serão criadas em runtime"
+
+# Também instala no sistema para fallback
+RUN mkdir -p /usr/local/share/fonts/custom && \
+    cp /app/fonts/* /usr/local/share/fonts/custom/ 2>/dev/null || true && \
+    fc-cache -fv 2>/dev/null || true
+
+# ==================== 15. HANDLER - SEMPRE ATUALIZADO ====================
 # Este ARG invalida o cache para SEMPRE copiar o handler mais recente
-ARG HANDLER_VERSION=15.4_20251218_0600_S3_DOWNLOAD
+ARG HANDLER_VERSION=15.5_20251218_0800_ULTRAFAST_FONTS
 RUN echo "Handler version: ${HANDLER_VERSION}"
 
 # Copia handler (NUNCA usa cache devido ao ARG acima)
 COPY handler.py .
 
 # Mostra versão no build log
-RUN echo "=== BUILD COMPLETO v15.4 ===" && \
+RUN echo "=== BUILD COMPLETO v15.5 ===" && \
     echo "Handler: ${HANDLER_VERSION}" && \
-    echo "Novidades: Background S3 API, libx264 ultrafast, correção broken pipe" && \
+    echo "Novidades: FFmpeg pipe NVENC, títulos da transcrição, 16 fontes" && \
+    echo "Fontes disponíveis:" && \
+    ls -la /app/fonts/ 2>/dev/null || echo "Fontes não encontradas" && \
     head -10 handler.py
 
 # Verifica se NVENC está disponível no build
