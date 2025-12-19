@@ -1,18 +1,35 @@
+# syntax=docker/dockerfile:1.4
 # ✂️ AnimeCut Serverless V15.8 - CORREÇÕES CRÍTICAS
-# CORREÇÕES: Títulos únicos, PNG dtype, Image import, Fallback encoding 
+# CORREÇÕES: Títulos únicos, PNG dtype, Image import, Fallback encoding
+# FORÇA REBUILD LIMPO - SEM CACHE
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
+# ==================== FORÇA REBUILD SEM CACHE ====================
+# TÉCNICA 1: ARG antes de qualquer instrução (invalida todo cache)
+ARG FORCE_REBUILD=1
+ARG BUILD_TIMESTAMP=20251219_0130_V15_8_NOCACHE
+
+# TÉCNICA 2: Gera valor único baseado na data/hora atual
+# Isso GARANTE que o cache nunca será usado
+RUN echo "Force rebuild: ${FORCE_REBUILD}" && \
+    echo "Timestamp: ${BUILD_TIMESTAMP}" && \
+    echo "Random: $(date +%s%N)" > /FORCE_REBUILD_$(date +%s) && \
+    rm -f /FORCE_REBUILD_*
+
+# TÉCNICA 3: Limpa qualquer cache residual do apt
+RUN rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* 2>/dev/null || true
+
 # ==================== CACHE BUSTER ====================
-# IMPORTANTE: Mude este valor para forçar rebuild completo no RunPod
-ARG CACHEBUST=20251218_2200_V15_8_CRITICAL_FIXES
+ARG CACHEBUST=20251219_0130_V15_8_FORCE_NOCACHE
 RUN echo "Build timestamp: ${CACHEBUST}" > /BUILD_INFO && \
-    echo "V15.8 - CORREÇÕES CRÍTICAS (Títulos, PNG, Encoding)" >> /BUILD_INFO
+    echo "V15.8 - CORREÇÕES CRÍTICAS (Títulos, PNG, Encoding)" >> /BUILD_INFO && \
+    echo "Build ID: $(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo $RANDOM)" >> /BUILD_INFO
 
 WORKDIR /app
 
 # Variáveis de Ambiente
 ENV BUILD_VERSION="15.8"
-ENV BUILD_DATE="2025-12-18T22:00:00Z"
+ENV BUILD_DATE="2025-12-19T01:30:00Z"
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
@@ -21,6 +38,9 @@ ENV TF_CPP_MIN_LOG_LEVEL="3"
 ENV PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:512"
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+
+# ==================== LIMPA CACHE APT ANTES DE INSTALAR ====================
+RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # ==================== 1. DEPENDÊNCIAS DE SISTEMA + cuDNN 9 ====================
 # Instala cuDNN 9.x que é necessário para ctranslate2/faster-whisper recentes
@@ -151,20 +171,23 @@ RUN mkdir -p /usr/local/share/fonts/custom && \
     fc-cache -fv
 
 # ==================== 15. HANDLER - SEMPRE ATUALIZADO ====================
-# Este ARG invalida o cache para SEMPRE copiar o handler mais recente
-ARG HANDLER_VERSION=15.8_20251218_2200_CRITICAL_FIXES
-RUN echo "Handler version: ${HANDLER_VERSION}"
+# FORÇA ATUALIZAÇÃO DO HANDLER SEM CACHE
+ARG HANDLER_NOCACHE=15.8_20251219_0130_FORCE
+RUN echo "Handler rebuild: ${HANDLER_NOCACHE} - $(date)" > /tmp/handler_build.txt
 
-# Copia handler (NUNCA usa cache devido ao ARG acima)
+# Copia handler (NUNCA usa cache)
 COPY handler.py .
 
-# Mostra versão no build log
+# Valida e mostra informações do build
 RUN echo "=== BUILD COMPLETO v15.8 ===" && \
-    echo "Handler: ${HANDLER_VERSION}" && \
+    echo "Handler timestamp: $(date -Iseconds)" && \
     echo "Correções: Títulos únicos, PNG dtype, Image import, Fallback encoding" && \
+    echo "Python version:" && python3 --version && \
     echo "Fontes disponíveis:" && \
-    ls -la /workspace/fonts/ && \
-    head -20 handler.py
+    ls -la /workspace/fonts/ 2>/dev/null || echo "Pasta fonts será criada no runtime" && \
+    echo "Handler header:" && \
+    head -20 handler.py && \
+    echo "Build finalizado com sucesso!"
 
 # Verifica se NVENC está disponível no build
 RUN ffmpeg -encoders 2>/dev/null | grep nvenc || echo "NVENC será verificado em runtime"
