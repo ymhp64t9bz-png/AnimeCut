@@ -1,4 +1,4 @@
-#!/usr/bin/env python3 
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 AnimeCut Serverless v15.8 CORREÇÕES CRÍTICAS
