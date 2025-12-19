@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AnimeCut Serverless v15.8 CORREÇÕES CRÍTICAS
-BUILD: 2025-12-18 22:00 - FIX ALL THE THINGS
+AnimeCut Serverless v15.9 FIX LAYOUT + TÍTULO
+BUILD: 2025-12-19 04:00 - CORREÇÕES DE RENDERIZAÇÃO
 Stack: Whisper V3 Turbo, YOLOv8, DeepFilterNet, FFmpeg NVENC/libx264
 CORREÇÕES: 
-- Títulos: Função reescrita sem recursão problemática
-- PNG: Conversão uint8 correta para PIL.Image
-- Image: Import global sem shadowing local
-- Encoding: 4 métodos de fallback (NVENC → libx264 → MoviePy → Corte bruto)
+- Título: MAX 2 linhas com auto-redimensionamento de fonte
+- Posição: Título na posição vertical correta (não mais no topo)
+- PNG: Tamanho completo 1080x1920 com posição embutida
+- Margem: 10% de cada lado para título não colar na borda
 """
 
 # ==================== IMPORTAÇÕES ESSENCIAIS ====================
@@ -1869,29 +1869,97 @@ def criar_titulo_simples(
                 logger.error("[TITULO] ✗ Não foi possível carregar NENHUMA fonte!")
                 return None
         
-        # Divide texto em linhas inteligentemente
-        palavras = texto.strip().split()
-        linhas = []
+        # ==================== v15.9: MÁXIMO 2 LINHAS COM AUTO-REDIMENSIONAMENTO ====================
+        # Margem lateral (10% de cada lado = 80% da largura útil)
+        margem_lateral = int(largura_video * 0.10)
+        largura_util = largura_video - (margem_lateral * 2)
         
-        if len(palavras) <= 2:
-            linhas = [texto]
-        elif len(palavras) <= 6:
+        # Cria imagem temporária para calcular tamanho do texto
+        temp_img = Image.new('RGBA', (largura_video, 100), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(temp_img)
+        
+        def calcular_linhas_com_fonte(texto_full, fonte_atual, max_largura):
+            """Calcula quantas linhas o texto ocuparia com a fonte atual"""
+            palavras = texto_full.strip().split()
+            if not palavras:
+                return [], 0
+            
+            linhas = []
+            linha_atual = ""
+            
+            for palavra in palavras:
+                teste = f"{linha_atual} {palavra}".strip() if linha_atual else palavra
+                try:
+                    bbox = draw.textbbox((0, 0), teste, font=fonte_atual)
+                    largura_teste = bbox[2] - bbox[0]
+                except:
+                    largura_teste = len(teste) * (font_size // 2)
+                
+                if largura_teste <= max_largura:
+                    linha_atual = teste
+                else:
+                    if linha_atual:
+                        linhas.append(linha_atual)
+                    linha_atual = palavra
+            
+            if linha_atual:
+                linhas.append(linha_atual)
+            
+            return linhas, len(linhas)
+        
+        # Tenta com o tamanho original
+        linhas, num_linhas = calcular_linhas_com_fonte(texto, font, largura_util)
+        
+        # Se mais de 2 linhas, REDUZ a fonte até caber em 2 linhas
+        tamanho_atual = font_size
+        min_font_size = 40  # Tamanho mínimo legível
+        
+        while num_linhas > 2 and tamanho_atual > min_font_size:
+            tamanho_atual -= 5  # Reduz 5px por vez
+            
+            # Recarrega fonte com novo tamanho
+            try:
+                if font_path:
+                    font = ImageFont.truetype(font_path, tamanho_atual)
+                else:
+                    # Usa fallback
+                    for fb_font in [
+                        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
+                    ]:
+                        if os.path.exists(fb_font):
+                            font = ImageFont.truetype(fb_font, tamanho_atual)
+                            break
+            except:
+                pass
+            
+            linhas, num_linhas = calcular_linhas_com_fonte(texto, font, largura_util)
+        
+        # Se ainda não coube, força 2 linhas cortando no meio
+        if num_linhas > 2:
+            palavras = texto.strip().split()
             meio = len(palavras) // 2
             linhas = [
                 " ".join(palavras[:meio]),
                 " ".join(palavras[meio:])
             ]
-        else:
-            # Divide em 2-3 linhas
-            terco = len(palavras) // 3
-            linhas = [
-                " ".join(palavras[:terco]),
-                " ".join(palavras[terco:terco*2]),
-                " ".join(palavras[terco*2:])
-            ]
+            logger.warning(f"[TITULO] Forçando 2 linhas (texto muito longo)")
         
-        # Limita a 3 linhas
-        linhas = linhas[:3]
+        # Garante MAX 2 linhas
+        linhas = linhas[:2]
+        
+        # Remove linhas vazias
+        linhas = [l for l in linhas if l.strip()]
+        
+        # Se ficou vazio, usa texto original em 1 linha
+        if not linhas:
+            linhas = [texto[:50]]  # Trunca se necessário
+        
+        logger.info(f"[TITULO] Linhas finais ({len(linhas)}): {linhas}")
+        logger.info(f"[TITULO] Fonte final: {tamanho_atual}px (original: {font_size}px)")
+        
+        # Atualiza font_size para o valor final
+        font_size = tamanho_atual
         
         # Cores
         text_rgb = hex_to_rgb(text_color)
@@ -1899,25 +1967,32 @@ def criar_titulo_simples(
         
         logger.info(f"[TITULO] Cores: texto={text_rgb}, borda={stroke_rgb}")
         
-        # Desenha texto
-        y_pos = 20
-        line_spacing = font_size + 15
+        # ==================== CRIA IMAGEM DO TÍTULO ====================
+        # Altura da imagem baseada no número de linhas
+        line_spacing = int(font_size * 1.3)
+        img_h = line_spacing * len(linhas) + 40  # +40 para padding
+        
+        # Cria imagem transparente
+        img = Image.new('RGBA', (largura_video, img_h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        
+        # Desenha texto centralizado
+        y_pos = 20  # Padding top
         
         for linha in linhas:
             if not linha.strip():
                 continue
             
-            # Posição central
+            # Calcula posição central
             try:
                 bbox = draw.textbbox((0, 0), linha, font=font)
                 text_width = bbox[2] - bbox[0]
             except:
-                # Fallback para fontes antigas
                 text_width = len(linha) * (font_size // 2)
             
-            x_pos = max(0, (largura_video - text_width) // 2)
+            x_pos = max(margem_lateral, (largura_video - text_width) // 2)
             
-            # Contorno (mais eficiente)
+            # Contorno (borda)
             if stroke_width > 0:
                 for dx in range(-stroke_width, stroke_width + 1):
                     for dy in range(-stroke_width, stroke_width + 1):
@@ -1944,6 +2019,9 @@ def criar_titulo_simples(
         # Converte para clip
         numpy_img = np.array(img)
         clip = moviepy_imports['ImageClip'](numpy_img).set_duration(duracao)
+        
+        # Posição vertical (pos_vertical é 0.0 a 1.0)
+        # 0.0 = topo, 0.5 = meio, 1.0 = fundo
         pos_y = max(0, min(altura_video - img_h, int(altura_video * pos_vertical)))
         clip = clip.set_position(('center', pos_y))
         
@@ -2967,24 +3045,49 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
         try:
             logger.info("[ENCODING] Método 1: FFmpeg PURO + NVENC")
             
-            # 1. Salva título como PNG transparente
+            # ==================== 1. CRIA TÍTULO PNG COM POSIÇÃO CORRETA ====================
+            # O título PNG deve ser do tamanho 1080x1920 com o texto na posição vertical correta
             title_png = None
+            title_y_position = 0  # Posição Y do título para o FFmpeg
+            
             if title_clip:
                 try:
                     title_png = TEMP_DIR / f"title_{num}_{uuid.uuid4().hex[:6]}.png"
-                    # Exporta o frame do título
+                    
+                    # Pega a posição do título (foi setada em criar_titulo_simples)
+                    title_style = config.get("titleStyle", {})
+                    pos_vertical = title_style.get("verticalPosition", 25) / 100.0  # 0.0 a 1.0
+                    
+                    # Pega dimensões do clip de título
                     title_frame = title_clip.get_frame(0)
-                    # Converte para uint8 se necessário
                     if title_frame.dtype != np.uint8:
                         title_frame = np.clip(title_frame, 0, 255).astype(np.uint8)
+                    
+                    title_h = title_frame.shape[0]
+                    title_w = title_frame.shape[1]
+                    
+                    # Calcula posição Y real (0.25 = 25% do topo)
+                    title_y_position = int(target_h * pos_vertical)
+                    title_y_position = max(0, min(target_h - title_h, title_y_position))
+                    
+                    # Cria imagem do tamanho total com título na posição correta
+                    full_title_img = Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
                     title_img = Image.fromarray(title_frame)
-                    title_img.save(str(title_png), 'PNG')
-                    logger.info(f"[TITULO] PNG salvo: {title_png}")
+                    
+                    # Centraliza horizontalmente
+                    x_pos = (target_w - title_w) // 2
+                    
+                    # Cola o título na posição correta
+                    full_title_img.paste(title_img, (x_pos, title_y_position), title_img if title_img.mode == 'RGBA' else None)
+                    
+                    full_title_img.save(str(title_png), 'PNG')
+                    logger.info(f"[TITULO] PNG salvo: {title_png} (posição Y: {title_y_position})")
+                    
                 except Exception as e:
                     logger.warning(f"[TITULO] Erro ao salvar PNG: {e}")
                     title_png = None
             
-            # 2. Salva background como PNG
+            # ==================== 2. SALVA BACKGROUND COMO PNG ====================
             bg_png = None
             if bg_clip:
                 try:
@@ -3789,15 +3892,15 @@ if __name__ == "__main__":
         # Banner com versão detalhada
         print("\n" + "="*70)
         print("╔═══════════════════════════════════════════════════════════════════╗")
-        print("║   ANIMECUT SERVERLESS v15.8 - BUILD 2025-12-18 22:00            ║")
-        print("║   🔧 CORREÇÕES: Títulos únicos, PNG dtype, Fallback encoding    ║")
+        print("║   ANIMECUT SERVERLESS v15.9 - BUILD 2025-12-19 04:00            ║")
+        print("║   🔧 FIX: Título MAX 2 linhas + Posição vertical correta        ║")
         print("╚═══════════════════════════════════════════════════════════════════╝")
-        print("Correções v15.8:")
-        print("  ✓ TÍTULOS: Função reescrita (sem recursão problemática)")
-        print("  ✓ PNG: Conversão uint8 correta para PIL")
-        print("  ✓ IMAGE: Import global corrigido (sem shadowing)")
-        print("  ✓ ENCODING: 4 métodos de fallback (último = corte bruto)")
-        print("  ✓ FALLBACK: Sempre usa libx264 se NVENC falhar")
+        print("Correções v15.9:")
+        print("  ✓ TÍTULO: Máximo 2 linhas (fonte diminui automaticamente)")
+        print("  ✓ POSIÇÃO: Título na posição vertical configurada pelo usuário")
+        print("  ✓ MARGEM: 10% de espaço nas bordas laterais")
+        print("  ✓ PNG: Tamanho completo 1080x1920 com posição embutida")
+        print("  ✓ ENCODING: 4 métodos de fallback robustos")
         print(f"Volume: {VOLUME_BASE}")
         print(f"Cache: {CACHE_DIR}")
         print(f"B2 Bucket: {B2_BUCKET if B2_BUCKET else 'NÃO CONFIGURADO'}")
