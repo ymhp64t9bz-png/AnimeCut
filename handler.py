@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AnimeCut Serverless v15.7 FFMPEG PURO + TÍTULOS CRIATIVOS
-BUILD: 2025-12-18 11:30 - MÁXIMA VELOCIDADE
-Stack: Whisper V3 Turbo, YOLOv8, DeepFilterNet, FFmpeg NVENC PURO
-NOVIDADES: 
-- FFmpeg direto (sem MoviePy no encoding) = ~30s/corte
-- 400+ títulos criativos por gênero
-- NUNCA usa títulos genéricos
+AnimeCut Serverless v15.8 CORREÇÕES CRÍTICAS
+BUILD: 2025-12-18 22:00 - FIX ALL THE THINGS
+Stack: Whisper V3 Turbo, YOLOv8, DeepFilterNet, FFmpeg NVENC/libx264
+CORREÇÕES: 
+- Títulos: Função reescrita sem recursão problemática
+- PNG: Conversão uint8 correta para PIL.Image
+- Image: Import global sem shadowing local
+- Encoding: 4 métodos de fallback (NVENC → libx264 → MoviePy → Corte bruto)
 """
 
 # ==================== IMPORTAÇÕES ESSENCIAIS ====================
@@ -2327,26 +2328,24 @@ def analyze_video_content_gpu(
                     return True
             return False
         
-        def generate_unique_title_v157(text, moment_type, index, anime_name, start_time, all_segs):
+        def generate_unique_title_v158(text, moment_type, index, anime_name, start_time, all_segs):
             """
-            v15.7: GERAÇÃO DE TÍTULOS CRIATIVOS DA BIBLIOTECA
+            v15.8: GERAÇÃO DE TÍTULOS - CORRIGIDA
             
             REGRAS:
             1. NUNCA usa nome do anime como título
-            2. NUNCA usa títulos genéricos como "CIDADE_NO_BRASILEIRO"
+            2. NUNCA repete títulos (tracked via used_titles)
             3. USA texto da transcrição se for BOM
             4. USA biblioteca de 400+ títulos como fallback
-            5. DETECTA tipo de cena para escolher título apropriado
             """
             
             def detectar_tipo_cena(texto):
                 """Detecta tipo de cena baseado no texto"""
                 if not texto:
-                    return moment_type  # Usa tipo passado
+                    return moment_type or 'epic'
                 
                 texto_lower = texto.lower()
                 
-                # Keywords por categoria
                 if any(w in texto_lower for w in ['luta', 'batalha', 'ataque', 'golpe', 'matar', 'destruir', 'poder', 'força']):
                     return 'action'
                 if any(w in texto_lower for w in ['amo', 'amor', 'gostar', 'coração', 'te amo', 'gosto']):
@@ -2382,69 +2381,79 @@ def analyze_video_content_gpu(
                 
                 lista = bibliotecas.get(tipo.lower(), TITULOS_EPICO)
                 
-                # Embaralha de forma determinística baseado no index
-                random.seed(idx * 137 + len(str(start_time)))
+                # Usa combinação de idx e um contador para garantir variedade
+                seed_value = idx * 137 + int(start_time * 10) % 1000
+                random.seed(seed_value)
                 shuffled = lista.copy()
                 random.shuffle(shuffled)
                 
                 # Encontra um título não usado
                 for titulo in shuffled:
                     if titulo not in used_titles:
-                        used_titles.add(titulo)
                         return titulo
                 
-                # Se todos usados, pega aleatório com modificação
-                base = random.choice(lista)
-                modified = f"{base[:-1]} #{idx+1}!"
-                used_titles.add(modified)
-                return modified
-            
-            # ========== TENTA CRIAR TÍTULO DO TEXTO ==========
-            if text and not text.startswith("[") and len(text.strip()) > 8:
-                clean_text = text.strip().replace("[", "").replace("]", "")
+                # Se todos usados, cria variação única
+                base = shuffled[idx % len(shuffled)]
+                for i in range(100):
+                    modified = f"{base[:-1]} #{idx+1+i}!"
+                    if modified not in used_titles:
+                        return modified
                 
-                # REJEITA textos que parecem nomes de lugar/anime
+                # Último recurso
+                return f"CENA ÉPICA #{idx+1}!"
+            
+            def tentar_criar_do_texto(texto):
+                """Tenta criar título a partir do texto da transcrição"""
+                if not texto or texto.startswith("[") or len(texto.strip()) <= 8:
+                    return None
+                
+                clean_text = texto.strip().replace("[", "").replace("]", "")
                 palavras = clean_text.split()
                 
-                # Se tem menos de 3 palavras, provavelmente é nome/lugar - REJEITA
+                # Se tem menos de 3 palavras, rejeita
                 if len(palavras) < 3:
-                    logger.warning(f"[TITULO v15.7] Texto muito curto, usando biblioteca: '{clean_text}'")
+                    return None
+                
+                # Verifica se é frase de verdade
+                texto_lower = clean_text.lower()
+                palavras_de_frase = ['eu', 'você', 'ele', 'ela', 'nós', 'vou', 'vai', 'preciso', 
+                                    'quero', 'nunca', 'sempre', 'não', 'sim', 'como', 'porque',
+                                    'fazer', 'ser', 'ter', 'poder', 'dever', 'meu', 'seu']
+                
+                if not any(p in texto_lower for p in palavras_de_frase):
+                    return None
+                
+                # Cria título
+                if len(palavras) <= 8:
+                    base_title = clean_text.upper()
                 else:
-                    # Verifica se é frase de verdade (tem verbo/ação)
-                    texto_lower = clean_text.lower()
-                    palavras_de_frase = ['eu', 'você', 'ele', 'ela', 'nós', 'vou', 'vai', 'preciso', 
-                                        'quero', 'nunca', 'sempre', 'não', 'sim', 'como', 'porque',
-                                        'fazer', 'ser', 'ter', 'poder', 'dever', 'meu', 'seu']
+                    power_starts = ["eu", "você", "ele", "ela", "nós", "vou", "vai", 
+                                   "nunca", "sempre", "preciso", "quero", "isso", "não"]
+                    best_start = 0
+                    for i, w in enumerate(palavras[:5]):
+                        if w.lower() in power_starts:
+                            best_start = i
+                            break
                     
-                    tem_estrutura_frase = any(p in texto_lower for p in palavras_de_frase)
-                    
-                    if tem_estrutura_frase and len(palavras) >= 3:
-                        # PARECE ser uma frase boa, usa
-                        if len(palavras) <= 8:
-                            base_title = clean_text.upper()
-                        else:
-                            # Encontra início com palavra de impacto
-                            power_starts = ["eu", "você", "ele", "ela", "nós", "vou", "vai", 
-                                           "nunca", "sempre", "preciso", "quero", "isso", "não"]
-                            best_start = 0
-                            for i, w in enumerate(palavras[:5]):
-                                if w.lower() in power_starts:
-                                    best_start = i
-                                    break
-                            
-                            end_idx = min(best_start + 7, len(palavras))
-                            base_title = " ".join(palavras[best_start:end_idx]).upper()
-                        
-                        # Remove pontuação e adiciona !
-                        base_title = base_title.rstrip(".,;:!?\"'") + "!"
-                        
-                        # Verifica se não é repetido
-                        if base_title not in used_titles:
-                            used_titles.add(base_title)
-                            logger.info(f"[TITULO v15.7] ✓ Da transcrição: '{base_title}'")
-                            return base_title
+                    end_idx = min(best_start + 7, len(palavras))
+                    base_title = " ".join(palavras[best_start:end_idx]).upper()
+                
+                base_title = base_title.rstrip(".,;:!?\"'") + "!"
+                
+                # Verifica se não é repetido
+                if base_title not in used_titles:
+                    return base_title
+                
+                return None
             
-            # ========== BUSCA TEXTO NO INTERVALO ==========
+            # ========== 1. TENTA DO TEXTO DIRETO ==========
+            titulo_do_texto = tentar_criar_do_texto(text)
+            if titulo_do_texto:
+                used_titles.add(titulo_do_texto)
+                logger.info(f"[TITULO v15.8] ✓ Da transcrição: '{titulo_do_texto}'")
+                return titulo_do_texto
+            
+            # ========== 2. BUSCA TEXTO NO INTERVALO (SEM RECURSÃO) ==========
             if all_segs:
                 for seg in all_segs:
                     seg_start = seg.get("start", 0)
@@ -2452,17 +2461,18 @@ def analyze_video_content_gpu(
                     
                     if seg_start >= start_time - 20 and seg_end <= start_time + 90:
                         seg_text = seg.get("text", "").strip()
-                        if seg_text and len(seg_text) > 15 and not seg_text.startswith("["):
-                            # Tenta usar esse texto
-                            result = generate_unique_title_v157(seg_text, moment_type, index, anime_name, start_time, None)
-                            if result and result not in used_titles:
-                                return result
+                        titulo_do_seg = tentar_criar_do_texto(seg_text)
+                        if titulo_do_seg:
+                            used_titles.add(titulo_do_seg)
+                            logger.info(f"[TITULO v15.8] ✓ Do segmento próximo: '{titulo_do_seg}'")
+                            return titulo_do_seg
             
-            # ========== USA BIBLIOTECA DE TÍTULOS CRIATIVOS ==========
+            # ========== 3. USA BIBLIOTECA ==========
             tipo_detectado = detectar_tipo_cena(text)
             titulo_criativo = escolher_da_biblioteca(tipo_detectado, index)
+            used_titles.add(titulo_criativo)
             
-            logger.info(f"[TITULO v15.7] ✓ Da biblioteca ({tipo_detectado}): '{titulo_criativo}'")
+            logger.info(f"[TITULO v15.8] ✓ Da biblioteca ({tipo_detectado}): '{titulo_criativo}'")
             return titulo_criativo
         
         # Processa cada momento importante
@@ -2499,7 +2509,7 @@ def analyze_video_content_gpu(
                 continue
             
             # v15.6: Gera título ÚNICO usando nova função
-            title = generate_unique_title_v157(
+            title = generate_unique_title_v158(
                 moment.get("text", ""), 
                 moment["type"], 
                 len(cuts),
@@ -2547,7 +2557,7 @@ def analyze_video_content_gpu(
                             break
                     
                     # v15.6: Usa nova função de título único
-                    title = generate_unique_title_v157(
+                    title = generate_unique_title_v158(
                         segment_text, 
                         "segment", 
                         len(cuts),
@@ -2964,7 +2974,9 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
                     title_png = TEMP_DIR / f"title_{num}_{uuid.uuid4().hex[:6]}.png"
                     # Exporta o frame do título
                     title_frame = title_clip.get_frame(0)
-                    from PIL import Image
+                    # Converte para uint8 se necessário
+                    if title_frame.dtype != np.uint8:
+                        title_frame = np.clip(title_frame, 0, 255).astype(np.uint8)
                     title_img = Image.fromarray(title_frame)
                     title_img.save(str(title_png), 'PNG')
                     logger.info(f"[TITULO] PNG salvo: {title_png}")
@@ -2978,9 +2990,11 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
                 try:
                     bg_png = TEMP_DIR / f"bg_{num}_{uuid.uuid4().hex[:6]}.png"
                     bg_frame = bg_clip.get_frame(0)
-                    from PIL import Image
-                    bg_img = Image.fromarray(bg_frame)
-                    bg_img.save(str(bg_png), 'PNG')
+                    # Converte para uint8 se necessário
+                    if bg_frame.dtype != np.uint8:
+                        bg_frame = np.clip(bg_frame, 0, 255).astype(np.uint8)
+                    bg_img_pil = Image.fromarray(bg_frame)
+                    bg_img_pil.save(str(bg_png), 'PNG')
                     logger.info(f"[BG] PNG salvo: {bg_png}")
                 except Exception as e:
                     logger.warning(f"[BG] Erro ao salvar PNG: {e}")
@@ -3125,13 +3139,10 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
         # ==================== MÉTODO 2: FFMPEG SIMPLES (SEM OVERLAY) ====================
         if not encoding_success:
             try:
-                logger.info("[ENCODING] Método 2: FFmpeg simples (corte direto)")
+                logger.info("[ENCODING] Método 2: FFmpeg simples (corte direto, libx264)")
                 
-                # Comando mais simples - só corte + resize + encode
-                if nvenc_available:
-                    encoder_args = ['-c:v', 'h264_nvenc', '-preset', 'p2', '-b:v', '5M']
-                else:
-                    encoder_args = ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26']
+                # SEMPRE usa libx264 aqui - se NVENC falhou no Método 1, não tenta de novo
+                encoder_args = ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26']
                 
                 cmd = [
                     'ffmpeg', '-y',
@@ -3160,6 +3171,9 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
                     logger.info(f"    Tempo: {encode_time:.1f}s | Velocidade: {speed:.2f}x")
                     logger.info(f"    ⚠ SEM título/background (overlay falhou)")
                     logger.info("=" * 60)
+                else:
+                    if proc.stderr:
+                        logger.warning(f"[FFMPEG SIMPLES] Erro: {proc.stderr[:200]}")
                     
             except Exception as e:
                 logger.warning(f"[FFMPEG SIMPLES] Erro: {str(e)[:100]}")
@@ -3171,17 +3185,12 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
             temp_audio = TEMP_DIR / f"audio_{num}_{uuid.uuid4().hex[:6]}.m4a"
             
             try:
-                if nvenc_available:
-                    codec_args = {
-                        'codec': 'h264_nvenc',
-                        'ffmpeg_params': ['-preset', 'p2', '-b:v', '5M', '-pix_fmt', 'yuv420p']
-                    }
-                else:
-                    codec_args = {
-                        'codec': 'libx264',
-                        'preset': 'ultrafast',
-                        'ffmpeg_params': ['-crf', '28', '-pix_fmt', 'yuv420p']
-                    }
+                # SEMPRE usa libx264 - NVENC pode estar com problemas
+                codec_args = {
+                    'codec': 'libx264',
+                    'preset': 'ultrafast',
+                    'ffmpeg_params': ['-crf', '28', '-pix_fmt', 'yuv420p']
+                }
                 
                 final.write_videofile(
                     str(output_path),
@@ -3208,6 +3217,46 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
                     
             except Exception as e:
                 logger.error(f"[MOVIEPY] Também falhou: {str(e)[:100]}")
+        
+        # ==================== MÉTODO 4: CORTE BRUTO (ÚLTIMO RECURSO) ====================
+        if not encoding_success:
+            logger.warning("[ENCODING] Método 4: Corte bruto (sem composição)")
+            
+            try:
+                # Corte super simples - só extrai o trecho sem processamento
+                cmd = [
+                    'ffmpeg', '-y',
+                    '-ss', str(start),
+                    '-t', str(cut_duration),
+                    '-i', video_path,
+                    '-c:v', 'libx264',
+                    '-preset', 'ultrafast',
+                    '-crf', '28',
+                    '-vf', f'scale=1080:-2',
+                    '-c:a', 'aac', '-b:a', '96k',
+                    '-pix_fmt', 'yuv420p',
+                    '-movflags', '+faststart',
+                    str(output_path)
+                ]
+                
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                
+                if proc.returncode == 0 and output_path.exists() and output_path.stat().st_size > 10000:
+                    encoding_success = True
+                    encode_time = time.time() - start_encode
+                    file_size = output_path.stat().st_size / 1e6
+                    
+                    logger.info("=" * 60)
+                    logger.info(f"[✓ SUCCESS] Corte {num} - Corte bruto")
+                    logger.info(f"    Tempo: {encode_time:.1f}s")
+                    logger.info(f"    ⚠ SEM título/background/9:16 (fallback extremo)")
+                    logger.info("=" * 60)
+                else:
+                    if proc.stderr:
+                        logger.error(f"[CORTE BRUTO] FFmpeg erro: {proc.stderr[:300]}")
+                    
+            except Exception as e:
+                logger.error(f"[CORTE BRUTO] Falhou: {str(e)[:100]}")
         
         if not encoding_success:
             raise Exception("Encoding falhou com todos os codecs")
@@ -3740,15 +3789,15 @@ if __name__ == "__main__":
         # Banner com versão detalhada
         print("\n" + "="*70)
         print("╔═══════════════════════════════════════════════════════════════════╗")
-        print("║   ANIMECUT SERVERLESS v15.7 - BUILD 2025-12-18 12:00            ║")
-        print("║   🚀 FFMPEG PURO + 400+ TÍTULOS CRIATIVOS POR GÊNERO            ║")
+        print("║   ANIMECUT SERVERLESS v15.8 - BUILD 2025-12-18 22:00            ║")
+        print("║   🔧 CORREÇÕES: Títulos únicos, PNG dtype, Fallback encoding    ║")
         print("╚═══════════════════════════════════════════════════════════════════╝")
-        print("Novidades v15.7:")
-        print("  ✓ ENCODING: FFMPEG PURO (~30s/corte em vez de 5+ min)")
-        print("  ✓ TÍTULOS: 400+ opções criativas por gênero")
-        print("  ✓ DETECÇÃO: Identifica tipo de cena (ação/romance/humor/etc)")
-        print("  ✓ NUNCA repete títulos entre cortes")
-        print("  ✓ NUNCA usa nome do anime como título")
+        print("Correções v15.8:")
+        print("  ✓ TÍTULOS: Função reescrita (sem recursão problemática)")
+        print("  ✓ PNG: Conversão uint8 correta para PIL")
+        print("  ✓ IMAGE: Import global corrigido (sem shadowing)")
+        print("  ✓ ENCODING: 4 métodos de fallback (último = corte bruto)")
+        print("  ✓ FALLBACK: Sempre usa libx264 se NVENC falhar")
         print(f"Volume: {VOLUME_BASE}")
         print(f"Cache: {CACHE_DIR}")
         print(f"B2 Bucket: {B2_BUCKET if B2_BUCKET else 'NÃO CONFIGURADO'}")
