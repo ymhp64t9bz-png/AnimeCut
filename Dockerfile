@@ -1,5 +1,5 @@
 # ✂️ AnimeCut Serverless V15.8 - CORREÇÕES CRÍTICAS
-# CORREÇÕES: Títulos únicos, PNG dtype, Image import, Fallback encoding
+# CORREÇÕES: Títulos únicos, PNG dtype, Image import, Fallback encoding 
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 # ==================== CACHE BUSTER ====================
