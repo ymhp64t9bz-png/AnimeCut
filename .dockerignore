@@ -1,0 +1,86 @@
+# .dockerignore para AnimeCut
+# Evita enviar arquivos desnecessários para o build context
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python cache
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Temporários
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Documentação
+*.md
+!README.md
+docs/
+
+# Testes
+tests/
+test/
+*.test.py
+
+# Arquivos grandes desnecessários
+*.mp4
+*.avi
+*.mkv
+*.mov
+*.wav
+*.mp3
+*.zip
+*.tar
+*.tar.gz
+*.rar
+
+# Modelos (serão baixados em runtime)
+models/
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# Cache de builds anteriores
+.cache/
+.buildcache/
