@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1.4
-# ✂️ AnimeCut Serverless V15.9 - FIX TÍTULO + LAYOUT
-# CORREÇÕES: MAX 2 linhas, posição vertical correta, encoding
+# ✂️ AnimeCut Serverless V15.9.1 - FIX LAYOUT DEFINITIVO
+# CORREÇÕES: MoviePy primeiro (layout garantido), MAX 2 linhas título
 # FORÇA REBUILD LIMPO - SEM CACHE
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 # ==================== FORÇA REBUILD SEM CACHE ====================
 # TÉCNICA 1: ARG antes de qualquer instrução (invalida todo cache)
-ARG FORCE_REBUILD=2
-ARG BUILD_TIMESTAMP=20251219_0400_V15_9_LAYOUT_FIX
+ARG FORCE_REBUILD=3
+ARG BUILD_TIMESTAMP=20251219_0500_V15_9_1_MOVIEPY_FIRST
 
 # TÉCNICA 2: Gera valor único baseado na data/hora atual
 # Isso GARANTE que o cache nunca será usado
@@ -20,16 +20,16 @@ RUN echo "Force rebuild: ${FORCE_REBUILD}" && \
 RUN rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* 2>/dev/null || true
 
 # ==================== CACHE BUSTER ====================
-ARG CACHEBUST=20251219_0400_V15_9_LAYOUT
+ARG CACHEBUST=20251219_0500_V15_9_1_FIX_LAYOUT
 RUN echo "Build timestamp: ${CACHEBUST}" > /BUILD_INFO && \
-    echo "V15.9 - FIX: Título MAX 2 linhas, posição correta" >> /BUILD_INFO && \
+    echo "V15.9.1 - FIX: MoviePy primeiro, MAX 2 linhas" >> /BUILD_INFO && \
     echo "Build ID: $(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo $RANDOM)" >> /BUILD_INFO
 
 WORKDIR /app
 
 # Variáveis de Ambiente
-ENV BUILD_VERSION="15.9"
-ENV BUILD_DATE="2025-12-19T04:00:00Z"
+ENV BUILD_VERSION="15.9.1"
+ENV BUILD_DATE="2025-12-19T05:00:00Z"
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HOME="/runpod-volume/.cache/huggingface"
@@ -172,16 +172,16 @@ RUN mkdir -p /usr/local/share/fonts/custom && \
 
 # ==================== 15. HANDLER - SEMPRE ATUALIZADO ====================
 # FORÇA ATUALIZAÇÃO DO HANDLER SEM CACHE
-ARG HANDLER_NOCACHE=15.9_20251219_0400_LAYOUT_FIX
+ARG HANDLER_NOCACHE=15.9.1_20251219_0500_MOVIEPY_FIRST
 RUN echo "Handler rebuild: ${HANDLER_NOCACHE} - $(date)" > /tmp/handler_build.txt
 
 # Copia handler (NUNCA usa cache)
 COPY handler.py .
 
 # Valida e mostra informações do build
-RUN echo "=== BUILD COMPLETO v15.9 ===" && \
+RUN echo "=== BUILD COMPLETO v15.9.1 ===" && \
     echo "Handler timestamp: $(date -Iseconds)" && \
-    echo "Correções: MAX 2 linhas título, posição vertical, margens" && \
+    echo "Correções: MoviePy primeiro, MAX 2 linhas, posição correta" && \
     echo "Python version:" && python3 --version && \
     echo "Fontes disponíveis:" && \
     ls -la /workspace/fonts/ 2>/dev/null || echo "Pasta fonts será criada no runtime" && \
