@@ -5,8 +5,8 @@
 FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 # ==================== FORÇA REBUILD SEM CACHE ====================
-ARG FORCE_REBUILD=9
-ARG BUILD_TIMESTAMP=20251222_2100_V15_9_7_NVENC_FFMPEG
+ARG FORCE_REBUILD=10
+ARG BUILD_TIMESTAMP=20251222_2130_V15_9_7_GNUTLS
 
 RUN echo "Force rebuild: ${FORCE_REBUILD}" && \
     echo "Timestamp: ${BUILD_TIMESTAMP}" && \
@@ -16,9 +16,9 @@ RUN echo "Force rebuild: ${FORCE_REBUILD}" && \
 RUN rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* 2>/dev/null || true
 
 # ==================== CACHE BUSTER ====================
-ARG CACHEBUST=20251222_2100_V15_9_7_NVENC
+ARG CACHEBUST=20251222_2130_V15_9_7_GNUTLS
 RUN echo "Build timestamp: ${CACHEBUST}" > /BUILD_INFO && \
-    echo "V15.9.7 - FFmpeg com NVENC compilado" >> /BUILD_INFO && \
+    echo "V15.9.7 - FFmpeg com NVENC (gnutls)" >> /BUILD_INFO && \
     echo "Build ID: $(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo $RANDOM)" >> /BUILD_INFO
 
 WORKDIR /app
@@ -73,6 +73,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libass-dev \
     libfreetype6-dev \
     libgnutls28-dev \
+    libssl-dev \
     libsdl2-dev \
     libva-dev \
     libvdpau-dev \
@@ -89,7 +90,7 @@ RUN git clone https://git.videolan.org/git/ffmpeg/nv-codec-headers.git /tmp/nv-c
     make install && \
     rm -rf /tmp/nv-codec-headers
 
-# Compila FFmpeg com suporte NVENC
+# Compila FFmpeg com suporte NVENC (usando gnutls ao invés de openssl para evitar conflitos)
 RUN git clone https://git.ffmpeg.org/ffmpeg.git /tmp/ffmpeg --depth 1 -b n6.1 && \
     cd /tmp/ffmpeg && \
     PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH" ./configure \
@@ -109,7 +110,7 @@ RUN git clone https://git.ffmpeg.org/ffmpeg.git /tmp/ffmpeg --depth 1 -b n6.1 &&
         --enable-libopus \
         --enable-libass \
         --enable-libfreetype \
-        --enable-openssl \
+        --enable-gnutls \
         --enable-pic \
         --enable-shared \
         --disable-static \
@@ -228,7 +229,7 @@ RUN mkdir -p /usr/local/share/fonts/custom && \
     fc-cache -fv
 
 # ==================== 16. HANDLER - SEMPRE ATUALIZADO ====================
-ARG HANDLER_NOCACHE=15.9.7_20251222_2100_NVENC_FFMPEG
+ARG HANDLER_NOCACHE=15.9.7_20251222_2130_GNUTLS
 RUN echo "Handler rebuild: ${HANDLER_NOCACHE} - $(date)" > /tmp/handler_build.txt
 
 COPY handler.py .
