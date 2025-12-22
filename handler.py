@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AnimeCut Serverless v15.9 FIX LAYOUT + TÍTULO
-BUILD: 2025-12-19 04:00 - CORREÇÕES DE RENDERIZAÇÃO
-Stack: Whisper V3 Turbo, YOLOv8, DeepFilterNet, FFmpeg NVENC/libx264
+AnimeCut Serverless v15.9.1 FIX LAYOUT DEFINITIVO
+BUILD: 2025-12-19 05:00 - MOVIEPY PRIMEIRO
+Stack: Whisper V3 Turbo, YOLOv8, DeepFilterNet, MoviePy + FFmpeg
 CORREÇÕES: 
+- ENCODING: MoviePy como método PRINCIPAL (garante layout correto)
 - Título: MAX 2 linhas com auto-redimensionamento de fonte
-- Posição: Título na posição vertical correta (não mais no topo)
-- PNG: Tamanho completo 1080x1920 com posição embutida
+- Posição: Título na posição vertical correta
 - Margem: 10% de cada lado para título não colar na borda
+- Fallback: FFmpeg simples se MoviePy falhar
 """
 
 # ==================== IMPORTAÇÕES ESSENCIAIS ====================
@@ -3015,13 +3016,12 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
         output_filename = f"cut_{num}_{safe_title}_{uuid.uuid4().hex[:6]}.mp4"
         output_path = OUTPUT_DIR / output_filename
         
-        # ==================== ENCODING v15.7 - FFMPEG PURO (SEM MOVIEPY) ====================
-        # PROBLEMA: MoviePy write_videofile é LENTO (~5 min por corte) mesmo com NVENC
-        # SOLUÇÃO: Usar FFmpeg diretamente para TUDO - corte, resize, overlay, encode
-        # RESULTADO ESPERADO: ~30-60 segundos por corte
+        # ==================== ENCODING v15.9 - MOVIEPY PRIMEIRO ====================
+        # PROBLEMA ANTERIOR: FFmpeg puro falhava e fallback não tinha layout correto
+        # SOLUÇÃO: MoviePy como método principal (layout garantido), FFmpeg só se necessário
         
         logger.info("=" * 60)
-        logger.info("[ENCODING v15.7] FFMPEG PURO - MÁXIMA VELOCIDADE")
+        logger.info("[ENCODING v15.9] MOVIEPY + FFMPEG FALLBACK")
         logger.info("=" * 60)
         
         start_encode = time.time()
@@ -3030,7 +3030,7 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
         
         encoding_success = False
         
-        # Verifica NVENC
+        # Verifica NVENC para escolher codec
         nvenc_available = False
         try:
             result = subprocess.run(['ffmpeg', '-hide_banner', '-encoders'], 
@@ -3040,212 +3040,98 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
         except:
             pass
         
-        # ==================== MÉTODO 1: FFMPEG PURO (ULTRAFAST) ====================
-        # Faz corte + resize + overlay de título em UMA passada FFmpeg
+        # ==================== MÉTODO 1: MOVIEPY (LAYOUT GARANTIDO) ====================
+        # MoviePy garante que o layout está correto (background + vídeo + título)
         try:
-            logger.info("[ENCODING] Método 1: FFmpeg PURO + NVENC")
+            logger.info("[ENCODING] Método 1: MoviePy (layout correto garantido)")
             
-            # ==================== 1. CRIA TÍTULO PNG COM POSIÇÃO CORRETA ====================
-            # O título PNG deve ser do tamanho 1080x1920 com o texto na posição vertical correta
-            title_png = None
-            title_y_position = 0  # Posição Y do título para o FFmpeg
+            temp_audio = TEMP_DIR / f"audio_{num}_{uuid.uuid4().hex[:6]}.m4a"
             
-            if title_clip:
-                try:
-                    title_png = TEMP_DIR / f"title_{num}_{uuid.uuid4().hex[:6]}.png"
-                    
-                    # Pega a posição do título (foi setada em criar_titulo_simples)
-                    title_style = config.get("titleStyle", {})
-                    pos_vertical = title_style.get("verticalPosition", 25) / 100.0  # 0.0 a 1.0
-                    
-                    # Pega dimensões do clip de título
-                    title_frame = title_clip.get_frame(0)
-                    if title_frame.dtype != np.uint8:
-                        title_frame = np.clip(title_frame, 0, 255).astype(np.uint8)
-                    
-                    title_h = title_frame.shape[0]
-                    title_w = title_frame.shape[1]
-                    
-                    # Calcula posição Y real (0.25 = 25% do topo)
-                    title_y_position = int(target_h * pos_vertical)
-                    title_y_position = max(0, min(target_h - title_h, title_y_position))
-                    
-                    # Cria imagem do tamanho total com título na posição correta
-                    full_title_img = Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
-                    title_img = Image.fromarray(title_frame)
-                    
-                    # Centraliza horizontalmente
-                    x_pos = (target_w - title_w) // 2
-                    
-                    # Cola o título na posição correta
-                    full_title_img.paste(title_img, (x_pos, title_y_position), title_img if title_img.mode == 'RGBA' else None)
-                    
-                    full_title_img.save(str(title_png), 'PNG')
-                    logger.info(f"[TITULO] PNG salvo: {title_png} (posição Y: {title_y_position})")
-                    
-                except Exception as e:
-                    logger.warning(f"[TITULO] Erro ao salvar PNG: {e}")
-                    title_png = None
-            
-            # ==================== 2. SALVA BACKGROUND COMO PNG ====================
-            bg_png = None
-            if bg_clip:
-                try:
-                    bg_png = TEMP_DIR / f"bg_{num}_{uuid.uuid4().hex[:6]}.png"
-                    bg_frame = bg_clip.get_frame(0)
-                    # Converte para uint8 se necessário
-                    if bg_frame.dtype != np.uint8:
-                        bg_frame = np.clip(bg_frame, 0, 255).astype(np.uint8)
-                    bg_img_pil = Image.fromarray(bg_frame)
-                    bg_img_pil.save(str(bg_png), 'PNG')
-                    logger.info(f"[BG] PNG salvo: {bg_png}")
-                except Exception as e:
-                    logger.warning(f"[BG] Erro ao salvar PNG: {e}")
-                    bg_png = None
-            
-            # 3. Monta comando FFmpeg complexo
-            # Input 0: vídeo original
-            # Input 1: background (se existir)
-            # Input 2: título (se existir)
-            
-            # Escolhe encoder
+            # Escolhe codec - tenta NVENC primeiro, fallback para libx264
             if nvenc_available:
-                video_encoder = ['-c:v', 'h264_nvenc', '-preset', 'p4', '-b:v', '6M', '-maxrate', '10M']
+                codec_args = {
+                    'codec': 'h264_nvenc',
+                    'ffmpeg_params': ['-preset', 'p4', '-b:v', '6M', '-pix_fmt', 'yuv420p']
+                }
+                logger.info("[CODEC] Usando NVENC")
             else:
-                video_encoder = ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23']
+                codec_args = {
+                    'codec': 'libx264',
+                    'preset': 'fast',
+                    'ffmpeg_params': ['-crf', '23', '-pix_fmt', 'yuv420p']
+                }
+                logger.info("[CODEC] Usando libx264")
             
-            # Calcula dimensões do vídeo dentro do frame 9:16
-            # Para letterbox: vídeo centralizado mantendo proporção
-            w, h = clip.w, clip.h
-            clip_aspect = w / h
-            
-            # Calcula tamanho do vídeo para caber em 1080x1920
-            if clip_aspect > (target_w / target_h):
-                # Vídeo mais largo - ajusta pela largura
-                vid_w = target_w
-                vid_h = int(target_w / clip_aspect)
-            else:
-                # Vídeo mais alto - ajusta pela altura
-                vid_h = target_h
-                vid_w = int(target_h * clip_aspect)
-            
-            # Garante dimensões pares
-            vid_w = vid_w - (vid_w % 2)
-            vid_h = vid_h - (vid_h % 2)
-            
-            # Posição centralizada
-            x_offset = (target_w - vid_w) // 2
-            y_offset = (target_h - vid_h) // 2
-            
-            logger.info(f"[LAYOUT] Vídeo: {vid_w}x{vid_h} em ({x_offset},{y_offset})")
-            
-            # Monta filter_complex
-            filters = []
-            
-            # Se tem background
-            if bg_png and bg_png.exists():
-                # [0] = vídeo, [1] = background
-                # Redimensiona vídeo e coloca sobre background
-                filters.append(f"[0:v]scale={vid_w}:{vid_h}[scaled]")
-                filters.append(f"[1:v]scale={target_w}:{target_h}[bg]")
-                filters.append(f"[bg][scaled]overlay={x_offset}:{y_offset}[withbg]")
-                current_stream = "withbg"
-            else:
-                # Sem background - cria fundo preto e coloca vídeo
-                filters.append(f"[0:v]scale={vid_w}:{vid_h}[scaled]")
-                filters.append(f"color=c=black:s={target_w}x{target_h}:d={cut_duration}[bg]")
-                filters.append(f"[bg][scaled]overlay={x_offset}:{y_offset}[withbg]")
-                current_stream = "withbg"
-            
-            # Se tem título
-            if title_png and title_png.exists():
-                input_count = 2 if bg_png else 1
-                filters.append(f"[{current_stream}][{input_count}:v]overlay=0:0[final]")
-                current_stream = "final"
-            
-            filter_complex = ";".join(filters)
-            
-            # Monta comando
-            cmd = ['ffmpeg', '-y']
-            
-            # Input 0: vídeo (com seek)
-            cmd.extend(['-ss', str(start), '-t', str(cut_duration), '-i', video_path])
-            
-            # Input 1: background (se existir)
-            if bg_png and bg_png.exists():
-                cmd.extend(['-loop', '1', '-t', str(cut_duration), '-i', str(bg_png)])
-            
-            # Input 2: título (se existir)
-            if title_png and title_png.exists():
-                cmd.extend(['-loop', '1', '-t', str(cut_duration), '-i', str(title_png)])
-            
-            # Filter complex
-            cmd.extend(['-filter_complex', filter_complex])
-            
-            # Map
-            cmd.extend(['-map', f'[{current_stream}]', '-map', '0:a?'])
-            
-            # Encoder
-            cmd.extend(video_encoder)
-            
-            # Audio
-            cmd.extend(['-c:a', 'aac', '-b:a', '128k'])
-            
-            # Output
-            cmd.extend([
-                '-pix_fmt', 'yuv420p',
-                '-movflags', '+faststart',
-                '-threads', '12',
-                str(output_path)
-            ])
-            
-            logger.info(f"[FFMPEG] Executando comando...")
-            logger.debug(f"[FFMPEG] {' '.join(cmd[:20])}...")
-            
-            # Executa
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=600  # 10 min timeout
+            final.write_videofile(
+                str(output_path),
+                **codec_args,
+                audio_codec='aac',
+                audio_bitrate='128k',
+                threads=8,
+                fps=24,
+                logger=None,
+                verbose=False,
+                temp_audiofile=str(temp_audio),
+                remove_temp=True
             )
             
-            # Limpa PNGs temporários
-            for tmp_file in [title_png, bg_png]:
-                if tmp_file and tmp_file.exists():
-                    try:
-                        tmp_file.unlink()
-                    except:
-                        pass
-            
-            if proc.returncode == 0 and output_path.exists() and output_path.stat().st_size > 50000:
+            if output_path.exists() and output_path.stat().st_size > 50000:
                 encoding_success = True
                 encode_time = time.time() - start_encode
                 file_size = output_path.stat().st_size / 1e6
                 speed = cut_duration / encode_time if encode_time > 0 else 0
                 
                 logger.info("=" * 60)
-                logger.info(f"[✓ SUCCESS] Corte {num} - FFMPEG PURO!")
+                logger.info(f"[✓ SUCCESS] Corte {num} - MoviePy!")
                 logger.info(f"    Arquivo: {file_size:.1f} MB")
                 logger.info(f"    Tempo: {encode_time:.1f}s")
                 logger.info(f"    Velocidade: {speed:.2f}x realtime")
-                logger.info(f"    Encoder: {'NVENC' if nvenc_available else 'libx264'}")
                 logger.info("=" * 60)
-            else:
-                logger.warning(f"[FFMPEG] Falhou: {proc.stderr[:500] if proc.stderr else 'sem erro'}")
                 
-        except subprocess.TimeoutExpired:
-            logger.warning("[FFMPEG] Timeout!")
         except Exception as e:
-            logger.warning(f"[FFMPEG] Erro: {str(e)[:200]}")
+            logger.warning(f"[MOVIEPY] Falhou: {str(e)[:200]}")
+            
+            # Se NVENC falhou, tenta de novo com libx264
+            if nvenc_available:
+                try:
+                    logger.info("[ENCODING] Tentando MoviePy com libx264...")
+                    
+                    codec_args = {
+                        'codec': 'libx264',
+                        'preset': 'ultrafast',
+                        'ffmpeg_params': ['-crf', '26', '-pix_fmt', 'yuv420p']
+                    }
+                    
+                    final.write_videofile(
+                        str(output_path),
+                        **codec_args,
+                        audio_codec='aac',
+                        audio_bitrate='128k',
+                        threads=8,
+                        fps=24,
+                        logger=None,
+                        verbose=False,
+                        temp_audiofile=str(temp_audio),
+                        remove_temp=True
+                    )
+                    
+                    if output_path.exists() and output_path.stat().st_size > 50000:
+                        encoding_success = True
+                        encode_time = time.time() - start_encode
+                        file_size = output_path.stat().st_size / 1e6
+                        
+                        logger.info("=" * 60)
+                        logger.info(f"[✓ SUCCESS] Corte {num} - MoviePy libx264!")
+                        logger.info(f"    Tempo: {encode_time:.1f}s")
+                        logger.info("=" * 60)
+                        
+                except Exception as e2:
+                    logger.warning(f"[MOVIEPY libx264] Também falhou: {str(e2)[:100]}")
         
-        # ==================== MÉTODO 2: FFMPEG SIMPLES (SEM OVERLAY) ====================
+        # ==================== MÉTODO 2: FFMPEG SIMPLES (SEM TÍTULO/BG) ====================
         if not encoding_success:
             try:
-                logger.info("[ENCODING] Método 2: FFmpeg simples (corte direto, libx264)")
-                
-                # SEMPRE usa libx264 aqui - se NVENC falhou no Método 1, não tenta de novo
-                encoder_args = ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26']
+                logger.info("[ENCODING] Método 2: FFmpeg simples (sem overlay)")
                 
                 cmd = [
                     'ffmpeg', '-y',
@@ -3253,73 +3139,29 @@ def processar_corte_gpu(video_path: str, cut_data: Dict, num: int, config: Dict)
                     '-t', str(cut_duration),
                     '-i', video_path,
                     '-vf', f'scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black',
-                    *encoder_args,
+                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26',
                     '-c:a', 'aac', '-b:a', '128k',
                     '-pix_fmt', 'yuv420p',
                     '-movflags', '+faststart',
-                    '-threads', '12',
                     str(output_path)
                 ]
                 
                 proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
                 
-                if proc.returncode == 0 and output_path.exists() and output_path.stat().st_size > 50000:
+                if proc.returncode == 0 and output_path.exists() and output_path.stat().st_size > 10000:
                     encoding_success = True
                     encode_time = time.time() - start_encode
-                    file_size = output_path.stat().st_size / 1e6
-                    speed = cut_duration / encode_time if encode_time > 0 else 0
                     
                     logger.info("=" * 60)
-                    logger.info(f"[✓ SUCCESS] Corte {num} - FFmpeg simples!")
-                    logger.info(f"    Tempo: {encode_time:.1f}s | Velocidade: {speed:.2f}x")
-                    logger.info(f"    ⚠ SEM título/background (overlay falhou)")
+                    logger.info(f"[✓ SUCCESS] Corte {num} - FFmpeg simples")
+                    logger.info(f"    ⚠ SEM título/background (fallback)")
                     logger.info("=" * 60)
                 else:
                     if proc.stderr:
-                        logger.warning(f"[FFMPEG SIMPLES] Erro: {proc.stderr[:200]}")
+                        logger.warning(f"[FFMPEG] Erro: {proc.stderr[:200]}")
                     
             except Exception as e:
-                logger.warning(f"[FFMPEG SIMPLES] Erro: {str(e)[:100]}")
-        
-        # ==================== MÉTODO 3: MOVIEPY (FALLBACK LENTO) ====================
-        if not encoding_success:
-            logger.warning("[ENCODING] Método 3: MoviePy (LENTO - último recurso)")
-            
-            temp_audio = TEMP_DIR / f"audio_{num}_{uuid.uuid4().hex[:6]}.m4a"
-            
-            try:
-                # SEMPRE usa libx264 - NVENC pode estar com problemas
-                codec_args = {
-                    'codec': 'libx264',
-                    'preset': 'ultrafast',
-                    'ffmpeg_params': ['-crf', '28', '-pix_fmt', 'yuv420p']
-                }
-                
-                final.write_videofile(
-                    str(output_path),
-                    **codec_args,
-                    audio_codec='aac',
-                    audio_bitrate='128k',
-                    threads=12,
-                    fps=24,
-                    logger=None,
-                    verbose=False,
-                    temp_audiofile=str(temp_audio),
-                    remove_temp=True
-                )
-                
-                if output_path.exists() and output_path.stat().st_size > 50000:
-                    encoding_success = True
-                    encode_time = time.time() - start_encode
-                    file_size = output_path.stat().st_size / 1e6
-                    
-                    logger.info("=" * 60)
-                    logger.info(f"[✓ SUCCESS] Corte {num} - MoviePy fallback")
-                    logger.info(f"    Tempo: {encode_time:.1f}s (LENTO)")
-                    logger.info("=" * 60)
-                    
-            except Exception as e:
-                logger.error(f"[MOVIEPY] Também falhou: {str(e)[:100]}")
+                logger.warning(f"[FFMPEG] Erro: {str(e)[:100]}")
         
         # ==================== MÉTODO 4: CORTE BRUTO (ÚLTIMO RECURSO) ====================
         if not encoding_success:
@@ -3892,15 +3734,15 @@ if __name__ == "__main__":
         # Banner com versão detalhada
         print("\n" + "="*70)
         print("╔═══════════════════════════════════════════════════════════════════╗")
-        print("║   ANIMECUT SERVERLESS v15.9 - BUILD 2025-12-19 04:00            ║")
-        print("║   🔧 FIX: Título MAX 2 linhas + Posição vertical correta        ║")
+        print("║   ANIMECUT SERVERLESS v15.9.1 - BUILD 2025-12-19 05:00           ║")
+        print("║   🔧 FIX: MoviePy primeiro (layout garantido) + MAX 2 linhas     ║")
         print("╚═══════════════════════════════════════════════════════════════════╝")
-        print("Correções v15.9:")
+        print("Correções v15.9.1:")
+        print("  ✓ ENCODING: MoviePy como método PRINCIPAL (layout garantido)")
         print("  ✓ TÍTULO: Máximo 2 linhas (fonte diminui automaticamente)")
-        print("  ✓ POSIÇÃO: Título na posição vertical configurada pelo usuário")
+        print("  ✓ POSIÇÃO: Título na posição vertical configurada")
         print("  ✓ MARGEM: 10% de espaço nas bordas laterais")
-        print("  ✓ PNG: Tamanho completo 1080x1920 com posição embutida")
-        print("  ✓ ENCODING: 4 métodos de fallback robustos")
+        print("  ✓ FALLBACK: FFmpeg simples se MoviePy falhar")
         print(f"Volume: {VOLUME_BASE}")
         print(f"Cache: {CACHE_DIR}")
         print(f"B2 Bucket: {B2_BUCKET if B2_BUCKET else 'NÃO CONFIGURADO'}")
